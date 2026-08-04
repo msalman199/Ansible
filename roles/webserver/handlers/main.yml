@@ -1,0 +1,26 @@
+---
+# Handlers for webserver role
+
+- name: restart apache
+  systemd:
+    name: "{{ webserver_service }}"
+    state: restarted
+  become: yes
+
+- name: reload apache
+  systemd:
+    name: "{{ webserver_service }}"
+    state: reloaded
+  become: yes
+
+- name: start apache
+  systemd:
+    name: "{{ webserver_service }}"
+    state: started
+  become: yes
+
+- name: stop apache
+  systemd:
+    name: "{{ webserver_service }}"
+    state: stopped
+  become: yes

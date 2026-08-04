@@ -1,0 +1,8 @@
+---
+- name: Deploy Web Server using Custom Role
+  hosts: webservers
+  become: yes
+  gather_facts: yes
+  
+  roles:
+    - webserver

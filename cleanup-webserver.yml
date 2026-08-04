@@ -1,0 +1,37 @@
+---
+- name: Cleanup Web Server Role
+  hosts: webservers
+  become: yes
+  
+  tasks:
+    - name: Stop Apache service
+      systemd:
+        name: apache2
+        state: stopped
+      ignore_errors: yes
+      
+    - name: Remove Apache package
+      apt:
+        name: apache2
+        state: absent
+        purge: yes
+      
+    - name: Remove configuration files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/www/html/index.html
+        - /etc/apache2
+      
+    - name: Remove firewall rule
+      ufw:
+        rule: allow
+        port: 80
+        proto: tcp
+        delete: yes
+      ignore_errors: yes
+      
+    - name: Display cleanup completion
+      debug:
+        msg: "Web server cleanup completed successfully"

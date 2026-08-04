@@ -1,0 +1,59 @@
+---
+- name: Test Web Server Role Deployment
+  hosts: webservers
+  gather_facts: yes
+  
+  tasks:
+    - name: Check if Apache package is installed
+      package_facts:
+        manager: apt
+      
+    - name: Verify Apache is installed
+      assert:
+        that:
+          - "'apache2' in ansible_facts.packages"
+        fail_msg: "Apache2 package is not installed"
+        success_msg: "Apache2 package is installed successfully"
+    
+    - name: Check Apache service status
+      systemd:
+        name: apache2
+      register: apache_status
+      
+    - name: Verify Apache service is running
+      assert:
+        that:
+          - apache_status.status.ActiveState == "active"
+        fail_msg: "Apache service is not running"
+        success_msg: "Apache service is running successfully"
+    
+    - name: Test HTTP response
+      uri:
+        url: "http://localhost:{{ webserver_port | default(80) }}"
+        method: GET
+        status_code: 200
+      register: http_response
+      
+    - name: Verify web page content
+      assert:
+        that:
+          - "'Welcome' in http_response.content"
+        fail_msg: "Web page content is not as expected"
+        success_msg: "Web page is serving correct content"
+    
+    - name: Check configuration files exist
+      stat:
+        path: "{{ item }}"
+      register: config_files
+      loop:
+        - /etc/apache2/sites-available/000-default.conf
+        - /var/www/html/index.html
+        - /etc/apache2/ports.conf
+      
+    - name: Verify configuration files
+      assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Configuration file {{ item.item }} does not exist"
+        success_msg: "Configuration file {{ item.item }} exists"
+      loop: "{{ config_files.results }}"

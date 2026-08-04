@@ -1,0 +1,12 @@
+# Default variables for webserver role
+webserver_package: apache2
+webserver_service: apache2
+webserver_port: 80
+webserver_document_root: /var/www/html
+webserver_index_file: index.html
+webserver_server_name: localhost
+webserver_admin_email: admin@localhost
+
+# Custom content variables
+site_title: "Welcome to My Web Server"
+site_message: "This server was configured using Ansible Roles!"

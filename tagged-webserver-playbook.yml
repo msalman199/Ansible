@@ -1,0 +1,12 @@
+---
+- name: Tagged Web Server Deployment
+  hosts: webservers
+  become: yes
+  gather_facts: yes
+  
+  roles:
+    - role: webserver
+      tags:
+        - webserver
+        - apache
+        - configuration

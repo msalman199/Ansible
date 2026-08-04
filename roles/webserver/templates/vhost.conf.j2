@@ -1,0 +1,14 @@
+<VirtualHost *:{{ webserver_port }}>
+    ServerName {{ webserver_server_name }}
+    ServerAdmin {{ webserver_admin_email }}
+    DocumentRoot {{ webserver_document_root }}
+    
+    ErrorLog {{ log_directory }}/error.log
+    CustomLog {{ log_directory }}/access.log combined
+    
+    <Directory {{ webserver_document_root }}>
+        Options Indexes FollowSymLinks
+        AllowOverride None
+        Require all granted
+    </Directory>
+</VirtualHost>

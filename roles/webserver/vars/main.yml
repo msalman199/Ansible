@@ -1,0 +1,4 @@
+# Role variables for webserver
+apache_config_file: /etc/apache2/sites-available/000-default.conf
+apache_ports_file: /etc/apache2/ports.conf
+log_directory: /var/log/apache2

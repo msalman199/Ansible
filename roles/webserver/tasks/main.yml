@@ -1,0 +1,77 @@
+---
+# Main tasks for webserver role
+
+- name: Update package cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: yes
+
+- name: Install Apache web server
+  apt:
+    name: "{{ webserver_package }}"
+    state: present
+  become: yes
+  notify: restart apache
+
+- name: Ensure Apache is started and enabled
+  systemd:
+    name: "{{ webserver_service }}"
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Create document root directory
+  file:
+    path: "{{ webserver_document_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+  become: yes
+
+- name: Deploy custom index.html from template
+  template:
+    src: index.html.j2
+    dest: "{{ webserver_document_root }}/{{ webserver_index_file }}"
+    owner: www-data
+    group: www-data
+    mode: '0644'
+  become: yes
+  notify: reload apache
+
+- name: Configure Apache virtual host
+  template:
+    src: vhost.conf.j2
+    dest: "{{ apache_config_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: yes
+  notify: reload apache
+
+- name: Configure Apache ports
+  lineinfile:
+    path: "{{ apache_ports_file }}"
+    regexp: '^Listen '
+    line: "Listen {{ webserver_port }}"
+  become: yes
+  notify: restart apache
+
+- name: Open firewall for HTTP traffic
+  ufw:
+    rule: allow
+    port: "{{ webserver_port }}"
+    proto: tcp
+  become: yes
+  ignore_errors: yes
+
+- name: Verify Apache configuration
+  command: apache2ctl configtest
+  become: yes
+  register: apache_config_test
+  changed_when: false
+
+- name: Display configuration test result
+  debug:
+    var: apache_config_test.stdout_lines

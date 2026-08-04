@@ -1,0 +1,23 @@
+---
+- name: Deploy Customized Web Server
+  hosts: webservers
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    site_title: "Al Nafi Learning Platform"
+    site_message: "Custom configuration deployed successfully!"
+    webserver_server_name: "learning.alnafi.com"
+    webserver_admin_email: "admin@alnafi.com"
+  
+  roles:
+    - webserver
+    
+  post_tasks:
+    - name: Display deployment summary
+      debug:
+        msg: 
+          - "Web server deployed successfully!"
+          - "Site title: {{ site_title }}"
+          - "Server name: {{ webserver_server_name }}"
+          - "Access URL: http://{{ webserver_server_name }}:{{ webserver_port }}"
