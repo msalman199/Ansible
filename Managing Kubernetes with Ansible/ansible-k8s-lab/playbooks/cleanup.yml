@@ -1,0 +1,65 @@
+---
+- name: Cleanup Kubernetes Resources
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+  
+  tasks:
+    - name: Get all resources in namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace_name }}"
+      register: namespace_check
+      ignore_errors: yes
+    
+    - name: Delete all deployments in namespace
+      kubernetes.core.k8s:
+        state: absent
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ namespace_name }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ deployments.resources | default([]) }}"
+      vars:
+        deployments: "{{ lookup('kubernetes.core.k8s', api_version='apps/v1', kind='Deployment', namespace=namespace_name) }}"
+      when: namespace_check.resources | length > 0
+    
+    - name: Delete all services in namespace
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Service
+        namespace: "{{ namespace_name }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ services.resources | default([]) }}"
+      vars:
+        services: "{{ lookup('kubernetes.core.k8s', api_version='v1', kind='Service', namespace=namespace_name) }}"
+      when: namespace_check.resources | length > 0
+    
+    - name: Wait for resources to be deleted
+      pause:
+        seconds: 10
+      when: namespace_check.resources | length > 0
+    
+    - name: Delete namespace
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace_name }}"
+      when: namespace_check.resources | length > 0
+    
+    - name: Verify cleanup
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace_name }}"
+      register: cleanup_check
+      ignore_errors: yes
+    
+    - name: Display cleanup result
+      debug:
+        msg: "Namespace {{ namespace_name }} has been successfully deleted"
+      when: cleanup_check.resources | length == 0
