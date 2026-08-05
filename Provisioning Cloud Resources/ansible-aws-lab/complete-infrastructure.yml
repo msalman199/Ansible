@@ -1,0 +1,87 @@
+---
+- name: Complete AWS Infrastructure Provisioning
+  hosts: localhost
+  gather_facts: no
+  vars:
+    region: "us-east-1"
+    instance_type: "t2.micro"
+    ami_id: "ami-0c02fb55956c7d316"
+    key_name: "ansible-lab-keypair"
+    security_group_name: "ansible-lab-sg"
+    instance_name: "ansible-provisioned-instance"
+  
+  tasks:
+    - name: Get default VPC information
+      amazon.aws.ec2_vpc_info:
+        region: "{{ region }}"
+        filters:
+          "is-default": "true"
+      register: vpc_info
+    
+    - name: Create security group
+      amazon.aws.ec2_security_group:
+        name: "{{ security_group_name }}"
+        description: "Security group for Ansible lab"
+        vpc_id: "{{ vpc_info.vpcs[0].vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            ports:
+              - 22
+            cidr_ip: 0.0.0.0/0
+            rule_desc: "SSH access"
+          - proto: tcp
+            ports:
+              - 80
+            cidr_ip: 0.0.0.0/0
+            rule_desc: "HTTP access"
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+        tags:
+          Name: "{{ security_group_name }}"
+          Environment: "Lab"
+        state: present
+      register: sg_result
+    
+    - name: Create EC2 key pair
+      amazon.aws.ec2_key:
+        name: "{{ key_name }}"
+        key_material: "{{ lookup('file', '~/.ssh/aws-lab-key.pub') }}"
+        region: "{{ region }}"
+        state: present
+    
+    - name: Launch EC2 instance
+      amazon.aws.ec2_instance:
+        name: "{{ instance_name }}"
+        image_id: "{{ ami_id }}"
+        instance_type: "{{ instance_type }}"
+        key_name: "{{ key_name }}"
+        security_groups:
+          - "{{ security_group_name }}"
+        region: "{{ region }}"
+        state: present
+        wait: true
+        wait_timeout: 300
+        tags:
+          Environment: "Lab"
+          Project: "Ansible-AWS-Lab"
+          Owner: "Student"
+      register: ec2_result
+    
+    - name: Create inventory file for the new instance
+      copy:
+        content: |
+          [aws_instances]
+          {{ ec2_result.instances[0].public_ip_address }} ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/aws-lab-key
+        dest: ./aws-inventory.ini
+    
+    - name: Display complete infrastructure information
+      debug:
+        msg: 
+          - "=== Infrastructure Provisioning Complete ==="
+          - "Security Group ID: {{ sg_result.group_id }}"
+          - "Instance ID: {{ ec2_result.instances[0].instance_id }}"
+          - "Public IP: {{ ec2_result.instances[0].public_ip_address }}"
+          - "Private IP: {{ ec2_result.instances[0].private_ip_address }}"
+          - "SSH Command: ssh -i ~/.ssh/aws-lab-key ec2-user@{{ ec2_result.instances[0].public_ip_address }}"
