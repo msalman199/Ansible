@@ -1,0 +1,492 @@
+ Ansible Playbook Testing with Molecule
+Lab Objectives
+By the end of this lab, students will be able to:
+
+Understand the importance of testing Ansible playbooks
+Install and configure Molecule for Ansible playbook testing
+Create a basic Ansible role structure
+Write test cases using Molecule to verify playbook functionality
+Execute automated tests to validate Ansible configurations
+Interpret test results and troubleshoot common issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with YAML syntax
+Basic knowledge of Ansible concepts (playbooks, roles, tasks)
+Understanding of Python package management (pip)
+Experience with text editors (nano, vim, or similar)
+Lab Environment
+Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your dedicated Linux machine. The provided machine is bare metal with no pre-installed tools, so you will install all required software during the lab exercises.
+
+Task 1: Set up Molecule for Testing Ansible Playbooks
+Subtask 1.1: Update System and Install Prerequisites
+First, update your system and install the necessary packages.
+
+# Update package repositories
+sudo apt update
+
+# Install Python3 and pip if not already installed
+sudo apt install -y python3 python3-pip python3-venv git
+
+# Install Docker for container-based testing
+sudo apt install -y docker.io
+
+# Add current user to docker group
+sudo usermod -aG docker $USER
+
+# Apply group changes (logout and login, or use newgrp)
+newgrp docker
+
+# Verify Docker installation
+docker --version
+Subtask 1.2: Create Python Virtual Environment
+Create an isolated Python environment for Molecule and its dependencies.
+
+# Create a directory for the lab
+mkdir -p ~/ansible-molecule-lab
+cd ~/ansible-molecule-lab
+
+# Create Python virtual environment
+python3 -m venv molecule-env
+
+# Activate the virtual environment
+source molecule-env/bin/activate
+
+# Upgrade pip to latest version
+pip install --upgrade pip
+Subtask 1.3: Install Molecule and Dependencies
+Install Molecule along with required plugins and dependencies.
+
+# Install Molecule with Docker driver
+pip install molecule[docker]
+
+# Install additional dependencies
+pip install ansible-core
+pip install molecule-plugins[docker]
+pip install docker
+
+# Verify installations
+molecule --version
+ansible --version
+Subtask 1.4: Initialize a New Ansible Role with Molecule
+Create a new Ansible role structure with Molecule testing framework.
+
+# Create a new role with Molecule
+molecule init role webserver --driver-name docker
+
+# Navigate to the role directory
+cd webserver
+
+# Examine the directory structure
+tree .
+If tree is not installed, use ls to explore:
+
+# Alternative way to see structure
+ls -la
+ls -la molecule/
+ls -la molecule/default/
+Subtask 1.5: Examine Molecule Configuration
+Review the default Molecule configuration files.
+
+# View the main Molecule configuration
+cat molecule/default/molecule.yml
+
+# View the converge playbook
+cat molecule/default/converge.yml
+
+# View the verify playbook
+cat molecule/default/verify.yml
+Task 2: Write a Test Case to Verify Playbook Functionality
+Subtask 2.1: Create a Simple Web Server Role
+Develop a basic Ansible role that installs and configures a web server.
+
+# Edit the main tasks file
+nano tasks/main.yml
+Add the following content to tasks/main.yml:
+
+---
+# tasks file for webserver
+- name: Update apt cache
+  apt:
+    update_cache: yes
+  become: yes
+
+- name: Install Apache web server
+  apt:
+    name: apache2
+    state: present
+  become: yes
+
+- name: Start and enable Apache service
+  systemd:
+    name: apache2
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Create a custom index.html
+  copy:
+    content: |
+      <html>
+      <head><title>Test Web Server</title></head>
+      <body>
+        <h1>Hello from Ansible Molecule Test!</h1>
+        <p>This web server was configured by Ansible.</p>
+      </body>
+      </html>
+    dest: /var/www/html/index.html
+    owner: www-data
+    group: www-data
+    mode: '0644'
+  become: yes
+
+- name: Ensure Apache is listening on port 80
+  lineinfile:
+    path: /etc/apache2/ports.conf
+    regexp: '^Listen 80'
+    line: 'Listen 80'
+  become: yes
+  notify: restart apache2
+Subtask 2.2: Create Handlers
+Create handlers for service management.
+
+# Edit the handlers file
+nano handlers/main.yml
+Add the following content to handlers/main.yml:
+
+---
+# handlers file for webserver
+- name: restart apache2
+  systemd:
+    name: apache2
+    state: restarted
+  become: yes
+
+- name: reload apache2
+  systemd:
+    name: apache2
+    state: reloaded
+  become: yes
+Subtask 2.3: Configure Molecule Test Instance
+Modify the Molecule configuration to use Ubuntu for testing.
+
+# Edit the Molecule configuration
+nano molecule/default/molecule.yml
+Replace the content with:
+
+---
+dependency:
+  name: galaxy
+driver:
+  name: docker
+platforms:
+  - name: instance
+    image: ubuntu:20.04
+    pre_build_image: true
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    command: /lib/systemd/systemd
+    tmpfs:
+      - /run
+      - /tmp
+    capabilities:
+      - SYS_ADMIN
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      interpreter_python: auto_silent
+      callback_whitelist: profile_tasks, timer, yaml
+    ssh_connection:
+      pipelining: false
+verifier:
+  name: ansible
+Subtask 2.4: Update the Converge Playbook
+Modify the converge playbook to apply the webserver role.
+
+# Edit the converge playbook
+nano molecule/default/converge.yml
+Replace the content with:
+
+---
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - role: webserver
+Subtask 2.5: Create Comprehensive Test Cases
+Write detailed test cases to verify the web server functionality.
+
+# Edit the verify playbook
+nano molecule/default/verify.yml
+Replace the content with:
+
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check if Apache2 package is installed
+      package_facts:
+        manager: apt
+      become: true
+
+    - name: Verify Apache2 is installed
+      assert:
+        that:
+          - "'apache2' in ansible_facts.packages"
+        fail_msg: "Apache2 package is not installed"
+        success_msg: "Apache2 package is successfully installed"
+
+    - name: Check Apache2 service status
+      systemd:
+        name: apache2
+      register: apache_status
+      become: true
+
+    - name: Verify Apache2 service is running
+      assert:
+        that:
+          - apache_status.status.ActiveState == "active"
+        fail_msg: "Apache2 service is not running"
+        success_msg: "Apache2 service is running successfully"
+
+    - name: Verify Apache2 service is enabled
+      assert:
+        that:
+          - apache_status.status.UnitFileState == "enabled"
+        fail_msg: "Apache2 service is not enabled"
+        success_msg: "Apache2 service is enabled"
+
+    - name: Check if Apache is listening on port 80
+      wait_for:
+        port: 80
+        host: localhost
+        timeout: 10
+      become: true
+
+    - name: Verify custom index.html exists
+      stat:
+        path: /var/www/html/index.html
+      register: index_file
+      become: true
+
+    - name: Assert index.html file exists
+      assert:
+        that:
+          - index_file.stat.exists
+        fail_msg: "Custom index.html file does not exist"
+        success_msg: "Custom index.html file exists"
+
+    - name: Check index.html content
+      slurp:
+        src: /var/www/html/index.html
+      register: index_content
+      become: true
+
+    - name: Verify index.html contains expected content
+      assert:
+        that:
+          - "'Hello from Ansible Molecule Test!' in (index_content.content | b64decode)"
+        fail_msg: "Index.html does not contain expected content"
+        success_msg: "Index.html contains the expected content"
+
+    - name: Test HTTP response
+      uri:
+        url: http://localhost
+        method: GET
+        return_content: yes
+      register: http_response
+      become: true
+
+    - name: Verify HTTP response is successful
+      assert:
+        that:
+          - http_response.status == 200
+          - "'Hello from Ansible Molecule Test!' in http_response.content"
+        fail_msg: "HTTP response test failed"
+        success_msg: "HTTP response test passed successfully"
+Subtask 2.6: Run Molecule Tests
+Execute the complete Molecule test suite to validate your Ansible role.
+
+# Run the full Molecule test sequence
+molecule test
+
+# If you want to run individual steps, you can use:
+# molecule create    # Create test instances
+# molecule converge  # Run the playbook
+# molecule verify    # Run verification tests
+# molecule destroy   # Clean up test instances
+Subtask 2.7: Analyze Test Results
+Monitor the test execution and understand the output.
+
+# If tests fail, you can debug by running:
+molecule converge
+molecule login
+
+# Inside the container, you can check:
+# systemctl status apache2
+# curl localhost
+# cat /var/www/html/index.html
+Subtask 2.8: Create Additional Test Scenarios
+Create a custom test scenario for different environments.
+
+# Create a new scenario
+molecule init scenario centos --driver-name docker
+
+# Navigate to the new scenario
+ls molecule/centos/
+
+# Edit the new scenario configuration
+nano molecule/centos/molecule.yml
+Add CentOS-specific configuration:
+
+---
+dependency:
+  name: galaxy
+driver:
+  name: docker
+platforms:
+  - name: centos-instance
+    image: centos:8
+    pre_build_image: true
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    command: /usr/sbin/init
+    tmpfs:
+      - /run
+      - /tmp
+    capabilities:
+      - SYS_ADMIN
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      interpreter_python: auto_silent
+verifier:
+  name: ansible
+Subtask 2.9: Run Tests for Multiple Scenarios
+Execute tests across different scenarios.
+
+# Test the default scenario
+molecule test -s default
+
+# Test the CentOS scenario (if created)
+molecule test -s centos
+
+# List all available scenarios
+molecule list
+Subtask 2.10: Generate Test Reports
+Create documentation and reports from your test results.
+
+# Create a simple test report
+echo "# Ansible Molecule Test Report" > test-report.md
+echo "## Test Date: $(date)" >> test-report.md
+echo "## Role: webserver" >> test-report.md
+echo "" >> test-report.md
+
+# Run tests with verbose output and capture results
+molecule test --debug > test-output.log 2>&1
+
+# Check if tests passed
+if [ $? -eq 0 ]; then
+    echo "## Test Status: PASSED" >> test-report.md
+else
+    echo "## Test Status: FAILED" >> test-report.md
+fi
+
+# View the report
+cat test-report.md
+Troubleshooting Common Issues
+Docker Permission Issues
+If you encounter Docker permission errors:
+
+# Ensure Docker service is running
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Verify Docker group membership
+groups $USER
+
+# If docker group is not listed, re-login or use:
+newgrp docker
+Python Virtual Environment Issues
+If virtual environment activation fails:
+
+# Deactivate and recreate the environment
+deactivate
+rm -rf molecule-env
+python3 -m venv molecule-env
+source molecule-env/bin/activate
+Molecule Test Failures
+If Molecule tests fail:
+
+# Check container status
+docker ps -a
+
+# View detailed logs
+molecule test --debug
+
+# Clean up and retry
+molecule destroy
+molecule test
+Package Installation Issues
+If package installations fail:
+
+# Update package cache
+sudo apt update
+
+# Install missing dependencies
+sudo apt install -y python3-dev build-essential
+
+# Upgrade pip and reinstall packages
+pip install --upgrade pip
+pip install --force-reinstall molecule[docker]
+Verification and Validation
+Verify Installation
+Confirm all tools are properly installed:
+
+# Check versions
+python3 --version
+pip --version
+molecule --version
+ansible --version
+docker --version
+
+# List installed Python packages
+pip list | grep -E "(molecule|ansible|docker)"
+Validate Test Environment
+Ensure the test environment is working correctly:
+
+# Test Docker functionality
+docker run hello-world
+
+# Verify Molecule can create instances
+cd ~/ansible-molecule-lab/webserver
+molecule create
+molecule list
+molecule destroy
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Set up a complete testing environment using Molecule, Docker, and Ansible on a single Linux machine
+Created a functional Ansible role that installs and configures Apache web server
+Developed comprehensive test cases that verify package installation, service status, file content, and HTTP responses
+Executed automated tests using Molecule's testing framework
+Learned troubleshooting techniques for common issues in Ansible testing environments
+Why This Matters:
+
+Testing Ansible playbooks with Molecule is crucial for maintaining reliable infrastructure automation. This approach allows you to:
+
+Catch errors early before deploying to production environments
+Ensure consistency across different operating systems and environments
+Validate configurations automatically without manual verification
+Improve code quality through systematic testing practices
+Build confidence in your automation scripts
+The skills you've developed in this lab are directly applicable to real-world DevOps scenarios where infrastructure reliability and automation quality are paramount. Molecule testing helps ensure that your Ansible roles work correctly across different environments and reduces the risk of deployment failures.
+
+By mastering these testing techniques, you're now equipped to create more robust and reliable infrastructure automation solutions that can be trusted in production environments.
