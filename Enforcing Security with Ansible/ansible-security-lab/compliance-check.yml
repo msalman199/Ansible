@@ -1,0 +1,52 @@
+---
+- name: Security Compliance Validation
+  hosts: local
+  become: yes
+  
+  tasks:
+    - name: Check SSH root login is disabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin no'
+        state: absent
+      check_mode: yes
+      register: ssh_root_check
+      failed_when: ssh_root_check.changed
+      
+    - name: Check password authentication is disabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication no'
+        state: absent
+      check_mode: yes
+      register: ssh_password_check
+      failed_when: ssh_password_check.changed
+      
+    - name: Verify UFW firewall is active
+      command: ufw status
+      register: ufw_status
+      failed_when: "'Status: active' not in ufw_status.stdout"
+      
+    - name: Check fail2ban is running
+      service:
+        name: fail2ban
+        state: started
+      check_mode: yes
+      register: fail2ban_check
+      
+    - name: Verify SSH service is running
+      service:
+        name: ssh
+        state: started
+      check_mode: yes
+      register: ssh_service_check
+      
+    - name: Display compliance results
+      debug:
+        msg: |
+          === SECURITY COMPLIANCE REPORT ===
+          SSH Root Login Disabled: {{ 'PASS' if not ssh_root_check.changed else 'FAIL' }}
+          SSH Password Auth Disabled: {{ 'PASS' if not ssh_password_check.changed else 'FAIL' }}
+          UFW Firewall Active: {{ 'PASS' if 'Status: active' in ufw_status.stdout else 'FAIL' }}
+          Fail2ban Service Running: {{ 'PASS' if not fail2ban_check.changed else 'FAIL' }}
+          SSH Service Running: {{ 'PASS' if not ssh_service_check.changed else 'FAIL' }}
