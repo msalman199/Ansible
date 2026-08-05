@@ -1,0 +1,66 @@
+---
+- name: Deploy Web Application
+  hosts: webservers
+  become: yes
+  vars:
+    app_name: webapp
+    app_path: /var/www/webapp
+    build_number: "{{ lookup('env', 'BUILD_NUMBER') | default('dev') }}"
+    
+  tasks:
+    - name: Ensure nginx is installed
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+        
+    - name: Create application directory
+      file:
+        path: "{{ app_path }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+        
+    - name: Deploy application files
+      template:
+        src: "../files/webapp/index.html"
+        dest: "{{ app_path }}/index.html"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+      notify: restart nginx
+      
+    - name: Configure nginx virtual host
+      copy:
+        src: "../files/webapp/app.conf"
+        dest: /etc/nginx/sites-available/webapp
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart nginx
+      
+    - name: Enable nginx site
+      file:
+        src: /etc/nginx/sites-available/webapp
+        dest: /etc/nginx/sites-enabled/webapp
+        state: link
+      notify: restart nginx
+      
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: restart nginx
+      
+    - name: Ensure nginx is running
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+        
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
