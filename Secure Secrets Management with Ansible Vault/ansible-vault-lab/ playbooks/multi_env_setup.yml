@@ -1,0 +1,44 @@
+---
+- name: Multi-Environment Setup
+  hosts: local
+  vars:
+    environment: "{{ env | default('development') }}"
+  vars_files:
+    - "../vault_files/{{ environment }}_secrets.yml"
+  tasks:
+    - name: Show current environment
+      debug:
+        msg: "Deploying to {{ environment }} environment"
+    
+    - name: Display database connection details
+      debug:
+        msg: 
+          - "Database Host: {{ db_host }}"
+          - "Database Name: {{ db_name }}"
+          - "Database Port: {{ db_port }}"
+    
+    - name: Create environment-specific config
+      copy:
+        content: |
+          # {{ environment | upper }} ENVIRONMENT CONFIG
+          # Generated on {{ ansible_date_time.iso8601 }}
+          
+          DATABASE_HOST={{ db_host }}
+          DATABASE_PORT={{ db_port }}
+          DATABASE_NAME={{ db_name }}
+          DATABASE_USER={{ db_username }}
+          
+          # API Configuration
+          API_KEY_LENGTH={{ api_key | length }}
+          
+        dest: "/tmp/{{ environment }}_config.env"
+        mode: '0600'
+    
+    - name: Verify environment config
+      stat:
+        path: "/tmp/{{ environment }}_config.env"
+      register: env_config
+    
+    - name: Show config file info
+      debug:
+        msg: "Config file for {{ environment }}: {{ env_config.stat.path }}"
