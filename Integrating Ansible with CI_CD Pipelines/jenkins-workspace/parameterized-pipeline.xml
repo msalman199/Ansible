@@ -1,0 +1,117 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>Parameterized CI/CD Pipeline with Ansible</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>ENVIRONMENT</name>
+          <description>Target environment for deployment</description>
+          <defaultValue>development</defaultValue>
+          <trim>false</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>APP_VERSION</name>
+          <description>Application version to deploy</description>
+          <defaultValue>1.0.0</defaultValue>
+          <trim>false</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>SKIP_TESTS</name>
+          <description>Skip deployment tests</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'ENVIRONMENT', defaultValue: 'development', description: 'Target environment')
+        string(name: 'APP_VERSION', defaultValue: '1.0.0', description: 'Application version')
+        booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip tests')
+    }
+    
+    environment {
+        ANSIBLE_HOST_KEY_CHECKING = 'False'
+        PROJECT_DIR = '/var/lib/jenkins/deployment-project'
+    }
+    
+    stages {
+        stage('Environment Info') {
+            steps {
+                echo "Deploying to environment: ${params.ENVIRONMENT}"
+                echo "Application version: ${params.APP_VERSION}"
+                echo "Skip tests: ${params.SKIP_TESTS}"
+                echo "Build number: ${BUILD_NUMBER}"
+            }
+        }
+        
+        stage('Pre-deployment') {
+            steps {
+                sh '''
+                    cd ${PROJECT_DIR}
+                    echo "Environment: ${ENVIRONMENT}" > deployment-info.txt
+                    echo "Version: ${APP_VERSION}" >> deployment-info.txt
+                    echo "Build: ${BUILD_NUMBER}" >> deployment-info.txt
+                    echo "Timestamp: $(date)" >> deployment-info.txt
+                '''
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                sh '''
+                    cd ${PROJECT_DIR}
+                    export BUILD_NUMBER=${BUILD_NUMBER}
+                    export ENVIRONMENT=${ENVIRONMENT}
+                    export APP_VERSION=${APP_VERSION}
+                    ansible-playbook -i inventory/hosts playbooks/deploy-webapp.yml -v \
+                        -e "environment=${ENVIRONMENT}" \
+                        -e "app_version=${APP_VERSION}" \
+                        -e "build_number=${BUILD_NUMBER}"
+                '''
+            }
+        }
+        
+        stage('Test Deployment') {
+            when {
+                not { params.SKIP_TESTS }
+            }
+            steps {
+                sh '''
+                    echo "Running deployment tests..."
+                    sleep 5
+                    
+                    # Test HTTP response
+                    if curl -s http://localhost | grep -q "Application Deployed Successfully"; then
+                        echo "✓ Deployment test: PASSED"
+                    else
+                        echo "✗ Deployment test: FAILED"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "Deployment to ${params.ENVIRONMENT} completed successfully!"
+        }
+        failure {
+            echo "Deployment to ${params.ENVIRONMENT} failed!"
+        }
+    }
+}
+    </script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
