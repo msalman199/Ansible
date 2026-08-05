@@ -1,0 +1,13 @@
+---
+# handlers file for webserver
+- name: restart apache2
+  systemd:
+    name: apache2
+    state: restarted
+  become: yes
+
+- name: reload apache2
+  systemd:
+    name: apache2
+    state: reloaded
+  become: yes
