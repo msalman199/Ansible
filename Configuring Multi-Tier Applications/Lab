@@ -1,0 +1,60 @@
+Configuring Multi-Tier Applications
+Objectives
+Design and deploy a three-tier web application stack (database, application, and web server layers) using Ansible automation
+Implement Ansible roles (self-contained, reusable units of automation logic) to separate concerns across tiers
+Verify end-to-end data flow from a browser-facing frontend through a Python backend to a MySQL database
+Prerequisites
+Comfort navigating and editing files on an Ubuntu Linux system via the command line
+Familiarity with how web applications communicate over HTTP and how relational databases store data
+Basic understanding of YAML syntax (indentation-based key-value structure)
+Lab Environment
+You will work on a dedicated AWS EC2 Ubuntu instance provided by Al Nafi. The instance has a base Ubuntu installation; you will install all required tools in Task 1.
+
+Task 1: Install and Verify the Automation Toolchain
+Requirement 1
+Install Python 3, pip, a Python virtual environment, and Ansible on the instance. Activate the virtual environment, install Ansible inside it, and configure a local inventory file that targets localhost using a local connection (no SSH). Verify the installation by running ansible --version and confirming the reported Python interpreter path points inside your virtual environment, then run ansible all -m ping against your inventory and confirm the response is pong.
+
+Confirm: ansible all -m ping returns a JSON block containing "ping": "pong" with no unreachable hosts.
+
+Troubleshoot this step:
+
+You may see ERROR! Unexpected Exception, this is probably a bug: No module named 'ansible' if you run ansible outside the activated virtual environment.
+Re-activate the environment with source ~/ansible-env/bin/activate and re-run the command; confirm the shell prompt prefix changes to (ansible-env) before proceeding.
+Official installation reference: https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+Requirement 2
+Install MySQL Server, Nginx (a high-performance reverse proxy and web server), and the Python packages flask, flask-cors, mysql-connector-python, and gunicorn (a production-grade Python WSGI server that runs Flask applications as a managed process) on the instance. Verify MySQL is running with systemctl status mysql, verify Nginx is running with systemctl status nginx, and verify the Python packages are importable from within your virtual environment using python -c "import flask, flask_cors, mysql.connector, gunicorn; print('OK')".
+
+Confirm: All three verification commands exit without error; systemctl status outputs show active (running) and the Python import prints OK.
+
+Troubleshoot this step:
+
+You may see Unit mysql.service could not be found if the package name resolved to mariadb-server instead of mysql-server on your Ubuntu version.
+Run apt-cache search mysql-server to find the correct package name for your Ubuntu release, then install the correct package and re-run systemctl status mysql.
+Official MySQL APT setup reference: https://dev.mysql.com/doc/mysql-apt-repo-quick-guide/en/
+Task 2: Build the Ansible Role Structure and Deploy the Database Tier
+Requirement 1
+Design and implement an Ansible project directory containing three roles named database, webserver, and application. Each role must follow the standard Ansible role directory layout (a role is a structured folder containing tasks/, handlers/, templates/, defaults/, and vars/ subdirectories). Define all shared configuration values â including the database name, database user, database password, application port, and web server port â in a single group_vars/all/main.yml file so that every role reads from one source of truth. Write a top-level playbook that applies all three roles to localhost.
+
+Confirm: Running ansible-playbook --syntax-check site.yml (or your chosen playbook name) exits with playbook: site.yml and zero errors.
+
+Requirement 2
+Implement the database role so that it creates a MySQL database named todoapp, creates a dedicated MySQL user with full privileges on that database only, and imports a schema that defines a tasks table with columns for id, title, description, status, and timestamps. The role must use a Jinja2 template (a text file containing {{ variable }} placeholders that Ansible fills in at runtime) for any MySQL client configuration file it writes to disk, and must include a handler that restarts MySQL only when a configuration file changes. After the role runs, verify the schema exists by running mysql -u todouser -p todoapp -e "DESCRIBE tasks;" and confirming all five columns appear.
+
+Confirm: mysql -u todouser -p todoapp -e "DESCRIBE tasks;" displays exactly five columns (id, title, description, status, and at least one timestamp column) with no error output.
+
+Task 3: Deploy the Application and Web Server Tiers and Verify End-to-End Functionality
+Requirement 1
+Implement the application role so that it deploys a Flask REST API that exposes three endpoints: GET /api/tasks (returns all rows from the tasks table as JSON), POST /api/tasks (inserts a new row), and GET /health (returns a JSON object confirming the service name and status). The application must run as a non-root system user under gunicorn managed by a systemd unit file (a systemd unit file is a configuration file that tells the Linux init system how to start, stop, and restart a process automatically). All database credentials in the application source must be injected via Ansible variables at deploy time â no credentials may be hardcoded in any template. Verify the service is running with systemctl status todo-app and that curl -s http://127.0.0.1:8080/health returns a JSON body containing "status".
+
+Confirm: curl -s http://127.0.0.1:8080/api/tasks returns a valid JSON array (including the seed rows inserted by the database role) with HTTP 200.
+
+Requirement 2
+Implement the webserver role so that Nginx serves a static HTML/CSS/JavaScript frontend from /var/www/todo-app/ and reverse-proxies all requests to /api/ to the gunicorn process on port 8080. The Nginx virtual host configuration must be generated from a Jinja2 template, must include the X-Frame-Options, X-Content-Type-Options, and X-XSS-Protection security headers, and must write access and error logs to named files under /var/log/nginx/. The role must include a handler that reloads Nginx only when the virtual host configuration changes. After the full playbook runs end-to-end, verify the complete stack by submitting a new task through the frontend form and confirming the new row appears when you query GET /api/tasks directly.
+
+Confirm: curl -s -o /dev/null -w "%{http_code}" http://localhost/ returns 200, and curl -s -X POST -H "Content-Type: application/json" -d '{"title":"Ansible test","status":"pending"}' http://localhost/api/tasks returns HTTP 201 followed by a subsequent GET /api/tasks response that includes the string Ansible test.
+
+Expected Outcomes
+A fully automated Ansible playbook that deploys a working three-tier application (MySQL database, Flask/gunicorn backend, Nginx frontend) from a bare Ubuntu instance with a single ansible-playbook command.
+All three tiers communicate correctly: the frontend proxies API calls through Nginx to Flask, and Flask reads and writes data to MySQL using credentials injected at deploy time.
+Conclusion
+This lab required you to design modular Ansible roles, manage secrets through variables rather than hardcoded values, and wire three independent service tiers into a single automated deployment. The patterns you applied here â idempotent tasks, Jinja2-templated configuration, systemd-managed services, and handler-driven restarts â are the same patterns used in production infrastructure automation. Extend this foundation by adding Ansible Vault for credential encryption and a second inventory group targeting a remote host to practice true multi-machine orchestration.
