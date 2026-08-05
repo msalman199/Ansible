@@ -1,0 +1,65 @@
+---
+- name: Scale Kubernetes Deployments
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    new_replica_count: 5
+  
+  tasks:
+    - name: Get current deployment status
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+      register: current_deployment
+    
+    - name: Display current replica count
+      debug:
+        msg: "Current replica count: {{ current_deployment.resources[0].spec.replicas }}"
+    
+    - name: Scale deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+          spec:
+            replicas: "{{ new_replica_count }}"
+      register: scale_result
+    
+    - name: Wait for scaling to complete
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: scaled_deployment
+    
+    - name: Display scaling result
+      debug:
+        msg: "Deployment scaled to {{ scaled_deployment.resources[0].status.readyReplicas }} replicas"
+    
+    - name: List all pods
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ namespace_name }}"
+        label_selectors:
+          - app={{ app_name }}
+      register: pod_list
+    
+    - name: Display pod information
+      debug:
+        msg: "Pod {{ item.metadata.name }} is in {{ item.status.phase }} state"
+      loop: "{{ pod_list.resources }}"
