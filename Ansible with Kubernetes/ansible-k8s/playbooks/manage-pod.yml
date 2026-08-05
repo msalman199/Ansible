@@ -1,0 +1,97 @@
+---
+- name: Manage Pod Lifecycle
+  hosts: localhost
+  gather_facts: false
+  vars:
+    namespace: ansible-demo
+    app_name: nginx-app
+    action: "{{ pod_action | default('info') }}"
+
+  tasks:
+    - name: Get pod information
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        name: "{{ app_name }}-pod"
+        namespace: "{{ namespace }}"
+      register: pod_info
+      when: action == "info"
+
+    - name: Display pod information
+      debug:
+        msg: 
+          - "Pod Name: {{ pod_info.resources[0].metadata.name }}"
+          - "Pod Status: {{ pod_info.resources[0].status.phase }}"
+          - "Pod IP: {{ pod_info.resources[0].status.podIP }}"
+          - "Node: {{ pod_info.resources[0].spec.nodeName }}"
+      when: action == "info" and pod_info.resources | length > 0
+
+    - name: Scale pod (delete and recreate)
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        name: "{{ app_name }}-pod"
+        namespace: "{{ namespace }}"
+        state: absent
+        wait: true
+      when: action == "restart"
+
+    - name: Recreate pod after restart
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: "{{ app_name }}-pod"
+            namespace: "{{ namespace }}"
+            labels:
+              app: "{{ app_name }}"
+              managed-by: ansible
+          spec:
+            containers:
+            - name: nginx
+              image: nginx:latest
+              ports:
+              - containerPort: 80
+              volumeMounts:
+              - name: config-volume
+                mountPath: /usr/share/nginx/html
+            volumes:
+            - name: config-volume
+              configMap:
+                name: "{{ app_name }}-config"
+        state: present
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+      when: action == "restart"
+
+    - name: Delete pod
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        name: "{{ app_name }}-pod"
+        namespace: "{{ namespace }}"
+        state: absent
+        wait: true
+      when: action == "delete"
+
+    - name: Delete service
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Service
+        name: "{{ app_name }}-service"
+        namespace: "{{ namespace }}"
+        state: absent
+      when: action == "delete"
+
+    - name: Delete configmap
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ app_name }}-config"
+        namespace: "{{ namespace }}"
+        state: absent
+      when: action == "delete"
