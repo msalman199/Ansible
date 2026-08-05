@@ -1,0 +1,43 @@
+---
+# tasks file for webserver
+- name: Update apt cache
+  apt:
+    update_cache: yes
+  become: yes
+
+- name: Install Apache web server
+  apt:
+    name: apache2
+    state: present
+  become: yes
+
+- name: Start and enable Apache service
+  systemd:
+    name: apache2
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Create a custom index.html
+  copy:
+    content: |
+      <html>
+      <head><title>Test Web Server</title></head>
+      <body>
+        <h1>Hello from Ansible Molecule Test!</h1>
+        <p>This web server was configured by Ansible.</p>
+      </body>
+      </html>
+    dest: /var/www/html/index.html
+    owner: www-data
+    group: www-data
+    mode: '0644'
+  become: yes
+
+- name: Ensure Apache is listening on port 80
+  lineinfile:
+    path: /etc/apache2/ports.conf
+    regexp: '^Listen 80'
+    line: 'Listen 80'
+  become: yes
+  notify: restart apache2
