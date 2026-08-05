@@ -1,0 +1,193 @@
+ Implementing Idempotence in Ansible
+Objectives
+Design and validate Ansible playbooks that produce zero changes on repeated execution against an already-converged system
+Identify structural patterns that break idempotence (unbounded shell appends, timestamp-keyed side effects, unconditional restarts) and replace them with declarative equivalents
+Build a self-contained verification harness that quantifies changed-task counts across multiple runs and fails if convergence is not achieved by the second run
+Prerequisites
+Comfort navigating and editing files on a Linux command line, including file permissions and ownership concepts
+Familiarity with YAML syntax and the difference between declarative and imperative configuration
+Understanding of Linux service management concepts (start, stop, enable, reload) and what a systemd unit file contains
+Lab Environment
+You will work on a dedicated AWS EC2 Ubuntu instance provided by Al Nafi. The instance has a base Ubuntu installation; you will install all required tools in Task 1.
+
+Task 1: Environment Setup and Verification
+Step 1.1 â Install Ansible and supporting tooling
+Your instance has no automation tooling pre-installed. Install Python 3, pip, and Ansible, then confirm the control node can reach itself over the local connection plugin.
+
+sudo apt-get update -y
+sudo apt-get install -y python3 python3-pip python3-venv jq tree
+python3 -m venv ~/ansible-venv
+source ~/ansible-venv/bin/activate
+pip install --upgrade pip
+pip install ansible
+Official installation reference if the above fails: https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+
+Troubleshoot this step:
+
+You may see error: externally-managed-environment if your system Python blocks pip installs globally.
+Recovery: use the venv path shown above; confirm activation with which python3 â it must point inside ~/ansible-venv/.
+Reference: https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+Verify Ansible is reachable and the version is 2.14 or later:
+
+ansible --version
+Expected output: a block beginning with ansible [core 2.1x.x] and a Python path inside your venv.
+
+Step 1.2 â Bootstrap the lab workspace and local inventory
+Create the directory layout and a minimal control-plane configuration that targets localhost without SSH. All subsequent playbooks must reference this inventory and config without modification.
+
+mkdir -p ~/idempotence-lab/{playbooks,files,templates,tests}
+cd ~/idempotence-lab
+cat > inventory <<'EOF'
+[local]
+localhost ansible_connection=local
+EOF
+cat > ansible.cfg <<'EOF'
+[defaults]
+inventory         = inventory
+host_key_checking = False
+stdout_callback   = yaml
+retry_files_enabled = False
+EOF
+Confirm Ansible can ping the local target:
+
+ansible local -m ping
+Expected output: localhost | SUCCESS => { "ping": "pong" }. Any other result means the inventory or connection plugin is misconfigured â re-examine ansible.cfg and the inventory file before proceeding.
+
+Troubleshoot this step:
+
+You may see [WARNING]: No inventory was parsed or localhost | UNREACHABLE.
+Recovery: run ansible --version and confirm config file points to ~/idempotence-lab/ansible.cfg; if not, verify you are inside ~/idempotence-lab/ when invoking ansible commands.
+Reference: https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html
+Task 2: Contrast Non-Idempotent and Idempotent Design
+Step 2.1 â Implement and observe a non-idempotent playbook
+Design a playbook at playbooks/non_idempotent.yml that contains at least three structurally non-idempotent tasks. Each task must use a shell or command module in a way that produces a new side effect on every invocation regardless of prior state. Concrete requirements:
+
+One task must append a line containing the current timestamp to a file, so the file grows with each run
+One task must create a directory whose name includes a runtime-generated value (such as an epoch timestamp), so a new directory appears on every run
+One task must use shell to write a key-value pair to a config file without checking whether the pair already exists
+Run the playbook twice in succession:
+
+ansible-playbook playbooks/non_idempotent.yml
+ansible-playbook playbooks/non_idempotent.yml
+After both runs, inspect the filesystem artifacts (the growing file, the duplicate directories, the repeated config lines) and record the changed= count from each run's summary line. Both runs will report non-zero changes. This is the baseline you are fixing in Step 2.2.
+
+Step 2.2 â Rewrite every task as a declarative, idempotent equivalent
+Create playbooks/idempotent_core.yml that satisfies the same configuration intent as Step 2.1 but uses only declarative Ansible modules. Architectural constraints:
+
+No shell or command module is permitted unless accompanied by both changed_when: false (for read-only queries) or a precise changed_when expression tied to the command's stdout
+Every file-write task must use copy, template, or lineinfile/blockinfile with explicit state, owner, group, and mode parameters
+Every service-affecting action must be expressed as a handler triggered by notify, never as an unconditional task
+The contract your playbook must satisfy is expressed by the following shell interface â your playbook must make all assertions pass:
+
+# idempotence_contract.sh
+# Run this after executing idempotent_core.yml at least twice.
+# Every assertion must exit 0.
+
+assert_file_line_count() {
+  local file="$1"
+  local expected_max="$2"
+  local actual
+  actual=$(wc -l < "$file")
+  [ "$actual" -le "$expected_max" ] \
+    || { echo "FAIL: $file has $actual lines, expected <= $expected_max"; exit 1; }
+  echo "PASS: $file line count ($actual) within limit"
+}
+
+assert_dir_count() {
+  local pattern="$1"
+  local expected_max="$2"
+  local actual
+  actual=$(find /tmp -maxdepth 1 -name "$pattern" -type d 2>/dev/null | wc -l)
+  [ "$actual" -le "$expected_max" ] \
+    || { echo "FAIL: found $actual dirs matching $pattern, expected <= $expected_max"; exit 1; }
+  echo "PASS: dir count for $pattern ($actual) within limit"
+}
+
+assert_key_unique() {
+  local file="$1"
+  local key="$2"
+  local count
+  count=$(grep -c "^${key}=" "$file" 2>/dev/null || echo 0)
+  [ "$count" -le 1 ] \
+    || { echo "FAIL: key $key appears $count times in $file"; exit 1; }
+  echo "PASS: key $key appears at most once in $file"
+}
+Run idempotent_core.yml three times. The second and third runs must report changed=0 in the play recap. If any run after the first reports changes, the playbook is not idempotent â diagnose and fix before continuing.
+
+Step 2.3 â Instrument changed-task counting across runs
+Write a Bash test harness at tests/run_convergence_check.sh. The harness must:
+
+Accept a playbook path as its first positional argument
+Execute the playbook exactly three times, capturing the full stdout of each run to a separate log file (run_1.log, run_2.log, run_3.log) inside a timestamped results directory under /tmp/
+Parse the changed=N value from each run's recap line using only standard POSIX tools (grep, awk, or sed â no Python, no jq)
+Exit with code 0 only if runs 2 and 3 both report changed=0; otherwise print which run failed and exit with code 1
+The harness interface contract:
+
+# Signature
+# Usage: ./tests/run_convergence_check.sh <playbook_path>
+# Exit codes:
+#   0  â playbook is idempotent (runs 2 and 3 changed=0)
+#   1  â playbook is NOT idempotent (at least one post-first run had changes)
+#   2  â playbook execution itself failed (non-zero ansible-playbook exit)
+
+run_convergence_check() {
+  local playbook_path="$1"   # absolute or relative path to .yml
+  local results_dir          # set internally to /tmp/convergence_<epoch>/
+  local changed_counts       # array of integers, one per run
+  # implementation owned by student
+}
+Validate the harness against both playbooks:
+
+chmod +x tests/run_convergence_check.sh
+./tests/run_convergence_check.sh playbooks/non_idempotent.yml   # must exit 1
+./tests/run_convergence_check.sh playbooks/idempotent_core.yml  # must exit 0
+Task 3: Production-Grade Idempotent System Configuration
+Step 3.1 â Build a multi-role idempotent system playbook
+Design playbooks/system_baseline.yml that configures a realistic application baseline on the local machine. The playbook must satisfy all of the following requirements simultaneously:
+
+Create a dedicated system user and group (appuser / appgroup) with a fixed UID/GID (choose values above 2000 to avoid conflicts), a non-login shell, and no home directory creation
+Install exactly the packages nginx, git, curl, and tree using the apt module with cache_valid_time set to prevent redundant index fetches on repeated runs
+Deploy a templated nginx virtual host configuration to /etc/nginx/sites-available/appsite and symlink it into sites-enabled/; the template must render the server's hostname dynamically using an Ansible fact
+Manage the nginx service state through handlers only â no direct state: restarted tasks outside of handlers
+Write an application config file to /etc/appsite/app.conf using template or copy with a checksum-stable content block; the file must be owned by appuser:appgroup with mode 0640
+Use blockinfile with a unique marker to insert a monitoring stub into /etc/nginx/nginx.conf so repeated runs do not duplicate the block
+Architectural constraint: the playbook must be fully re-entrant â running it against a machine that already has nginx installed and running must not cause a service interruption unless the configuration actually changed.
+
+The nginx virtual host template interface (students implement the body):
+
+{# templates/appsite.conf.j2 #}
+{# Required variables:                              #}
+{#   ansible_hostname  â injected automatically     #}
+{#   app_port          â integer, defined in vars   #}
+{#   web_root          â string, defined in vars    #}
+{# The rendered file must be valid nginx syntax.    #}
+Step 3.2 â Build a self-validating post-run assertion playbook
+Create playbooks/assert_baseline.yml â a standalone playbook that runs after system_baseline.yml and asserts the expected end state without making any changes. Every task in this playbook must have changed_when: false. Requirements:
+
+Assert that appuser exists with the correct UID using the getent command module
+Assert that all four required packages report installed state via the dpkg command module
+Assert that /etc/appsite/app.conf exists, is owned by appuser:appgroup, and has octal permissions 0640 using the stat module and assert module
+Assert that nginx is active and enabled using the systemd module in query mode
+Assert that http://localhost returns HTTP 200 using the uri module
+Run the full sequence:
+
+ansible-playbook playbooks/system_baseline.yml --diff
+ansible-playbook playbooks/system_baseline.yml --diff   # must show changed=0
+ansible-playbook playbooks/assert_baseline.yml          # must show ok=N, changed=0, failed=0
+./tests/run_convergence_check.sh playbooks/system_baseline.yml  # must exit 0
+The assertion playbook interface contract (students implement all tasks):
+
+# assert_baseline.yml structural contract
+# Every task must include:
+#   changed_when: false
+# No task may use shell or command to modify state.
+# Allowed modules: stat, assert, command (read-only), uri, systemd, getent (via command), debug
+# The play recap must show failed=0 and changed=0 on every run.
+Expected Outcomes
+The convergence check harness exits 0 for idempotent_core.yml and system_baseline.yml, and exits 1 for non_idempotent.yml, demonstrating measurable, automated idempotence verification
+The assertion playbook assert_baseline.yml reports failed=0 and changed=0 on every execution, confirming that the declared end state matches the actual system state
+Troubleshooting
+If your convergence harness reports changed=N on run 2 for a playbook you believe is idempotent, how would you isolate which specific task is responsible, and what Ansible flags or output modes would give you task-level change detail rather than only the play recap summary?
+If assert_baseline.yml fails on the uri module assertion for http://localhost even though systemctl is-active nginx returns active, what are the three most likely configuration-level causes, and how would you distinguish between them using only tools available on the instance?
+Conclusion
+Idempotence is not a property of individual modules in isolation â it emerges from the combination of module choice, parameter completeness, handler discipline, and the absence of runtime-generated side effects in task definitions. The convergence harness you built externalizes this property into a measurable, automatable signal rather than a manual inspection. Applying the assert playbook pattern as a post-run gate transforms idempotence from a design aspiration into an enforceable contract that can be integrated into any CI pipeline.
