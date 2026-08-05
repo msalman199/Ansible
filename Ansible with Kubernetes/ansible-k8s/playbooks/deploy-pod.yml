@@ -1,0 +1,92 @@
+---
+- name: Deploy Pod using Ansible
+  hosts: localhost
+  gather_facts: false
+  vars:
+    namespace: ansible-demo
+    app_name: nginx-app
+    image: nginx:latest
+    replicas: 1
+
+  tasks:
+    - name: Create ConfigMap for nginx configuration
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ app_name }}-config"
+            namespace: "{{ namespace }}"
+          data:
+            index.html: |
+              <!DOCTYPE html>
+              <html>
+              <head>
+                  <title>Ansible + Kubernetes Demo</title>
+              </head>
+              <body>
+                  <h1>Hello from Ansible-managed Pod!</h1>
+                  <p>This pod was deployed using Ansible Kubernetes modules.</p>
+                  <p>Pod Name: {{ app_name }}</p>
+              </body>
+              </html>
+        state: present
+
+    - name: Deploy Pod
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: "{{ app_name }}-pod"
+            namespace: "{{ namespace }}"
+            labels:
+              app: "{{ app_name }}"
+              managed-by: ansible
+          spec:
+            containers:
+            - name: nginx
+              image: "{{ image }}"
+              ports:
+              - containerPort: 80
+              volumeMounts:
+              - name: config-volume
+                mountPath: /usr/share/nginx/html
+            volumes:
+            - name: config-volume
+              configMap:
+                name: "{{ app_name }}-config"
+        state: present
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+      register: pod_result
+
+    - name: Display pod deployment result
+      debug:
+        msg: "Pod {{ pod_result.result.metadata.name }} deployed successfully in namespace {{ pod_result.result.metadata.namespace }}"
+
+    - name: Create Service for the Pod
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ app_name }}-service"
+            namespace: "{{ namespace }}"
+          spec:
+            selector:
+              app: "{{ app_name }}"
+            ports:
+            - protocol: TCP
+              port: 80
+              targetPort: 80
+            type: ClusterIP
+        state: present
+      register: service_result
+
+    - name: Display service creation result
+      debug:
+        msg: "Service {{ service_result.result.metadata.name }} created successfully"
