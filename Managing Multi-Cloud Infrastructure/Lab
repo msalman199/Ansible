@@ -1,0 +1,889 @@
+Managing Multi-Cloud Infrastructure
+Lab Objectives
+By the end of this lab, students will be able to:
+
+Install and configure Ansible for multi-cloud infrastructure management
+Write Ansible playbooks to provision resources across AWS, Azure, and Google Cloud Platform (GCP)
+Configure cloud provider credentials and authentication
+Implement dynamic inventories to automatically discover and manage cloud resources
+Execute multi-cloud deployment strategies using Infrastructure as Code principles
+Troubleshoot common multi-cloud configuration issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of cloud computing concepts (VMs, networks, storage)
+Familiarity with YAML syntax and structure
+Basic Linux command-line knowledge
+Understanding of SSH key pairs and authentication
+Knowledge of Infrastructure as Code (IaC) principles
+Access to AWS, Azure, and GCP accounts (free tier accounts are sufficient)
+Lab Environment
+Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your dedicated environment. The provided Linux machine is bare metal with no pre-installed tools, so you will install all required software during the lab exercises.
+
+Task 1: Environment Setup and Ansible Installation
+Subtask 1.1: Update System and Install Dependencies
+First, update your Linux system and install the necessary dependencies:
+
+# Update package repositories
+sudo apt update && sudo apt upgrade -y
+
+# Install Python3 and pip
+sudo apt install python3 python3-pip python3-venv git curl unzip -y
+
+# Verify Python installation
+python3 --version
+pip3 --version
+Subtask 1.2: Create Python Virtual Environment
+Create an isolated Python environment for Ansible:
+
+# Create a virtual environment
+python3 -m venv ansible-env
+
+# Activate the virtual environment
+source ansible-env/bin/activate
+
+# Upgrade pip in the virtual environment
+pip install --upgrade pip
+Subtask 1.3: Install Ansible and Cloud Provider Collections
+Install Ansible and the required cloud provider collections:
+
+# Install Ansible
+pip install ansible
+
+# Install cloud provider SDK libraries
+pip install boto3 botocore azure-cli azure-identity azure-mgmt-compute azure-mgmt-network azure-mgmt-resource google-auth google-cloud-compute
+
+# Install Ansible collections for cloud providers
+ansible-galaxy collection install amazon.aws
+ansible-galaxy collection install azure.azcollection
+ansible-galaxy collection install google.cloud
+
+# Verify Ansible installation
+ansible --version
+Subtask 1.4: Create Lab Directory Structure
+Set up the directory structure for your multi-cloud project:
+
+# Create main project directory
+mkdir ~/multi-cloud-lab
+cd ~/multi-cloud-lab
+
+# Create subdirectories
+mkdir -p {playbooks,inventories,group_vars,host_vars,roles,credentials}
+
+# Create initial files
+touch ansible.cfg
+touch inventories/hosts.yml
+Subtask 1.5: Configure Ansible Settings
+Create the Ansible configuration file:
+
+cat > ansible.cfg << 'EOF'
+[defaults]
+inventory = inventories/hosts.yml
+host_key_checking = False
+timeout = 30
+gathering = smart
+fact_caching = memory
+stdout_callback = yaml
+bin_ansible_callbacks = True
+
+[inventory]
+enable_plugins = aws_ec2, azure_rm, gcp_compute
+
+[ssh_connection]
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s
+pipelining = True
+EOF
+Task 2: Configure Cloud Provider Credentials
+Subtask 2.1: Set Up AWS Credentials
+Configure AWS credentials for Ansible:
+
+# Create AWS credentials directory
+mkdir -p ~/.aws
+
+# Create AWS credentials file (replace with your actual credentials)
+cat > ~/.aws/credentials << 'EOF'
+[default]
+aws_access_key_id = YOUR_AWS_ACCESS_KEY_ID
+aws_secret_access_key = YOUR_AWS_SECRET_ACCESS_KEY
+EOF
+
+# Create AWS config file
+cat > ~/.aws/config << 'EOF'
+[default]
+region = us-east-1
+output = json
+EOF
+
+# Set appropriate permissions
+chmod 600 ~/.aws/credentials ~/.aws/config
+Subtask 2.2: Set Up Azure Credentials
+Configure Azure authentication:
+
+# Install Azure CLI (if not already installed)
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+# Login to Azure (this will open a browser for authentication)
+az login
+
+# Set your subscription (replace with your subscription ID)
+az account set --subscription "YOUR_SUBSCRIPTION_ID"
+
+# Create a service principal for Ansible
+az ad sp create-for-rbac --name "ansible-sp" --role="Contributor" --scopes="/subscriptions/YOUR_SUBSCRIPTION_ID"
+
+# Note down the output values: appId, password, tenant
+Create Azure credentials file:
+
+cat > credentials/azure_credentials.yml << 'EOF'
+azure_subscription_id: "YOUR_SUBSCRIPTION_ID"
+azure_client_id: "YOUR_APP_ID"
+azure_secret: "YOUR_PASSWORD"
+azure_tenant: "YOUR_TENANT_ID"
+EOF
+
+chmod 600 credentials/azure_credentials.yml
+Subtask 2.3: Set Up GCP Credentials
+Configure Google Cloud Platform authentication:
+
+# Download and install Google Cloud SDK
+curl https://sdk.cloud.google.com | bash
+exec -l $SHELL
+
+# Initialize gcloud
+gcloud init
+
+# Create a service account
+gcloud iam service-accounts create ansible-sa --display-name="Ansible Service Account"
+
+# Grant necessary permissions
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:ansible-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/compute.admin"
+
+# Create and download service account key
+gcloud iam service-accounts keys create ~/multi-cloud-lab/credentials/gcp-key.json \
+    --iam-account=ansible-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com
+
+# Set environment variable
+export GOOGLE_APPLICATION_CREDENTIALS=~/multi-cloud-lab/credentials/gcp-key.json
+echo 'export GOOGLE_APPLICATION_CREDENTIALS=~/multi-cloud-lab/credentials/gcp-key.json' >> ~/.bashrc
+Task 3: Create Multi-Cloud Provisioning Playbooks
+Subtask 3.1: Create AWS EC2 Instance Playbook
+Create a playbook to provision AWS EC2 instances:
+
+cat > playbooks/aws-provision.yml << 'EOF'
+---
+- name: Provision AWS EC2 Instance
+  hosts: localhost
+  gather_facts: false
+  vars:
+    aws_region: us-east-1
+    instance_type: t2.micro
+    ami_id: ami-0c02fb55956c7d316  # Amazon Linux 2
+    key_name: ansible-key
+    security_group_name: ansible-sg
+    
+  tasks:
+    - name: Create security group
+      amazon.aws.ec2_security_group:
+        name: "{{ security_group_name }}"
+        description: Security group for Ansible managed instances
+        region: "{{ aws_region }}"
+        rules:
+          - proto: tcp
+            ports:
+              - 22
+            cidr_ip: 0.0.0.0/0
+            rule_desc: SSH access
+          - proto: tcp
+            ports:
+              - 80
+            cidr_ip: 0.0.0.0/0
+            rule_desc: HTTP access
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+      register: security_group
+
+    - name: Create EC2 key pair
+      amazon.aws.ec2_key:
+        name: "{{ key_name }}"
+        region: "{{ aws_region }}"
+      register: ec2_key
+
+    - name: Save private key
+      copy:
+        content: "{{ ec2_key.key.private_key }}"
+        dest: "~/multi-cloud-lab/credentials/aws-key.pem"
+        mode: '0600'
+      when: ec2_key.changed
+
+    - name: Launch EC2 instance
+      amazon.aws.ec2_instance:
+        name: ansible-aws-instance
+        image_id: "{{ ami_id }}"
+        instance_type: "{{ instance_type }}"
+        key_name: "{{ key_name }}"
+        security_groups:
+          - "{{ security_group_name }}"
+        region: "{{ aws_region }}"
+        wait: true
+        wait_timeout: 300
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+          Cloud: aws
+      register: aws_instance
+
+    - name: Display AWS instance information
+      debug:
+        msg: 
+          - "Instance ID: {{ aws_instance.instances[0].instance_id }}"
+          - "Public IP: {{ aws_instance.instances[0].public_ip_address }}"
+          - "Private IP: {{ aws_instance.instances[0].private_ip_address }}"
+EOF
+Subtask 3.2: Create Azure VM Playbook
+Create a playbook to provision Azure virtual machines:
+
+cat > playbooks/azure-provision.yml << 'EOF'
+---
+- name: Provision Azure Virtual Machine
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../credentials/azure_credentials.yml
+  vars:
+    resource_group: ansible-rg
+    location: eastus
+    vm_name: ansible-azure-vm
+    vm_size: Standard_B1s
+    admin_username: azureuser
+    
+  tasks:
+    - name: Create resource group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ resource_group }}"
+        location: "{{ location }}"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Create virtual network
+      azure.azcollection.azure_rm_virtualnetwork:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-vnet"
+        address_prefixes: "10.0.0.0/16"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Create subnet
+      azure.azcollection.azure_rm_subnet:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-subnet"
+        address_prefix: "10.0.1.0/24"
+        virtual_network: "{{ vm_name }}-vnet"
+
+    - name: Create public IP
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ resource_group }}"
+        allocation_method: Static
+        name: "{{ vm_name }}-public-ip"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+      register: public_ip
+
+    - name: Create Network Security Group
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-nsg"
+        rules:
+          - name: SSH
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 1001
+            direction: Inbound
+          - name: HTTP
+            protocol: Tcp
+            destination_port_range: 80
+            access: Allow
+            priority: 1002
+            direction: Inbound
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Create network interface
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-nic"
+        virtual_network: "{{ vm_name }}-vnet"
+        subnet: "{{ vm_name }}-subnet"
+        public_ip_name: "{{ vm_name }}-public-ip"
+        security_group: "{{ vm_name }}-nsg"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Generate SSH key pair
+      openssh_keypair:
+        path: "~/multi-cloud-lab/credentials/azure-key"
+        size: 2048
+      register: ssh_key
+
+    - name: Create virtual machine
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}"
+        vm_size: "{{ vm_size }}"
+        admin_username: "{{ admin_username }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ admin_username }}/.ssh/authorized_keys"
+            key_data: "{{ ssh_key.public_key }}"
+        network_interfaces: "{{ vm_name }}-nic"
+        image:
+          offer: 0001-com-ubuntu-server-focal
+          publisher: Canonical
+          sku: 20_04-lts-gen2
+          version: latest
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+          Cloud: azure
+      register: azure_vm
+
+    - name: Display Azure VM information
+      debug:
+        msg:
+          - "VM Name: {{ azure_vm.ansible_facts.azure_vm.name }}"
+          - "Public IP: {{ public_ip.state.ip_address }}"
+          - "Resource Group: {{ resource_group }}"
+EOF
+Subtask 3.3: Create GCP Compute Instance Playbook
+Create a playbook to provision GCP compute instances:
+
+cat > playbooks/gcp-provision.yml << 'EOF'
+---
+- name: Provision GCP Compute Instance
+  hosts: localhost
+  gather_facts: false
+  vars:
+    project_id: YOUR_PROJECT_ID
+    zone: us-central1-a
+    region: us-central1
+    instance_name: ansible-gcp-instance
+    machine_type: e2-micro
+    
+  tasks:
+    - name: Create firewall rule for SSH
+      google.cloud.gcp_compute_firewall:
+        name: ansible-ssh-firewall
+        allowed:
+          - ip_protocol: tcp
+            ports:
+              - '22'
+        source_ranges:
+          - '0.0.0.0/0'
+        target_tags:
+          - ansible-managed
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: present
+
+    - name: Create firewall rule for HTTP
+      google.cloud.gcp_compute_firewall:
+        name: ansible-http-firewall
+        allowed:
+          - ip_protocol: tcp
+            ports:
+              - '80'
+        source_ranges:
+          - '0.0.0.0/0'
+        target_tags:
+          - ansible-managed
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: present
+
+    - name: Generate SSH key pair for GCP
+      openssh_keypair:
+        path: "~/multi-cloud-lab/credentials/gcp-key"
+        size: 2048
+      register: gcp_ssh_key
+
+    - name: Create compute instance
+      google.cloud.gcp_compute_instance:
+        name: "{{ instance_name }}"
+        machine_type: "zones/{{ zone }}/machineTypes/{{ machine_type }}"
+        zone: "{{ zone }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        disks:
+          - auto_delete: true
+            boot: true
+            initialize_params:
+              source_image: projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts
+        network_interfaces:
+          - access_configs:
+              - name: External NAT
+                type: ONE_TO_ONE_NAT
+        tags:
+          items:
+            - ansible-managed
+        labels:
+          environment: lab
+          managed-by: ansible
+          cloud: gcp
+        metadata:
+          ssh-keys: "ubuntu:{{ gcp_ssh_key.public_key }}"
+        state: present
+      register: gcp_instance
+
+    - name: Display GCP instance information
+      debug:
+        msg:
+          - "Instance Name: {{ gcp_instance.name }}"
+          - "External IP: {{ gcp_instance.network_interfaces[0].access_configs[0].nat_ip }}"
+          - "Internal IP: {{ gcp_instance.network_interfaces[0].network_ip }}"
+          - "Zone: {{ gcp_instance.zone }}"
+EOF
+Subtask 3.4: Create Multi-Cloud Orchestration Playbook
+Create a master playbook that orchestrates all cloud deployments:
+
+cat > playbooks/multi-cloud-deploy.yml << 'EOF'
+---
+- name: Multi-Cloud Infrastructure Deployment
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Deploy AWS Infrastructure
+      include: aws-provision.yml
+      tags: aws
+
+    - name: Deploy Azure Infrastructure
+      include: azure-provision.yml
+      tags: azure
+
+    - name: Deploy GCP Infrastructure
+      include: gcp-provision.yml
+      tags: gcp
+
+    - name: Wait for all instances to be ready
+      pause:
+        seconds: 30
+
+    - name: Display deployment summary
+      debug:
+        msg:
+          - "Multi-cloud deployment completed successfully!"
+          - "AWS, Azure, and GCP instances have been provisioned."
+          - "Use dynamic inventories to manage these resources."
+EOF
+Task 4: Implement Dynamic Inventories
+Subtask 4.1: Create AWS Dynamic Inventory
+Create a dynamic inventory configuration for AWS:
+
+cat > inventories/aws_ec2.yml << 'EOF'
+---
+plugin: amazon.aws.aws_ec2
+regions:
+  - us-east-1
+  - us-west-2
+filters:
+  tag:ManagedBy: ansible
+  instance-state-name: running
+keyed_groups:
+  - key: tags.Environment
+    prefix: env
+  - key: tags.Cloud
+    prefix: cloud
+  - key: instance_type
+    prefix: type
+hostnames:
+  - ip-address
+  - dns-name
+compose:
+  ansible_host: public_ip_address
+  ansible_user: ec2-user
+  ansible_ssh_private_key_file: ~/multi-cloud-lab/credentials/aws-key.pem
+EOF
+Subtask 4.2: Create Azure Dynamic Inventory
+Create a dynamic inventory configuration for Azure:
+
+cat > inventories/azure_rm.yml << 'EOF'
+---
+plugin: azure.azcollection.azure_rm
+include_vm_resource_groups:
+  - ansible-rg
+auth_source: auto
+keyed_groups:
+  - key: tags.Environment | default('unknown')
+    prefix: env
+  - key: tags.Cloud | default('unknown')
+    prefix: cloud
+  - key: location
+    prefix: location
+hostnames:
+  - public_ipv4_addresses
+  - name
+compose:
+  ansible_host: public_ipv4_addresses[0] | default(private_ipv4_addresses[0])
+  ansible_user: azureuser
+  ansible_ssh_private_key_file: ~/multi-cloud-lab/credentials/azure-key
+EOF
+Subtask 4.3: Create GCP Dynamic Inventory
+Create a dynamic inventory configuration for GCP:
+
+cat > inventories/gcp_compute.yml << 'EOF'
+---
+plugin: google.cloud.gcp_compute
+projects:
+  - YOUR_PROJECT_ID
+auth_kind: serviceaccount
+service_account_file: ~/multi-cloud-lab/credentials/gcp-key.json
+filters:
+  - labels.managed-by = ansible
+  - status = RUNNING
+keyed_groups:
+  - key: labels.environment | default('unknown')
+    prefix: env
+  - key: labels.cloud | default('unknown')
+    prefix: cloud
+  - key: zone
+    prefix: zone
+hostnames:
+  - public_ip
+  - name
+compose:
+  ansible_host: networkInterfaces[0].accessConfigs[0].natIP | default(networkInterfaces[0].networkIP)
+  ansible_user: ubuntu
+  ansible_ssh_private_key_file: ~/multi-cloud-lab/credentials/gcp-key
+EOF
+Subtask 4.4: Create Combined Dynamic Inventory
+Create a script to combine all dynamic inventories:
+
+cat > inventories/multi-cloud-inventory.sh << 'EOF'
+#!/bin/bash
+
+# Multi-cloud dynamic inventory script
+INVENTORY_DIR="$(dirname "$0")"
+
+echo "{"
+echo '  "_meta": {'
+echo '    "hostvars": {}'
+echo '  },'
+
+# Combine all cloud inventories
+ansible-inventory -i "$INVENTORY_DIR/aws_ec2.yml" --list 2>/dev/null | jq -r '.all.children // {} | keys[]' | while read group; do
+    echo "  \"aws_$group\": {"
+    ansible-inventory -i "$INVENTORY_DIR/aws_ec2.yml" --list 2>/dev/null | jq -r ".\"$group\".hosts // []" | jq -r '.[]' | while read host; do
+        echo "    \"$host\""
+    done
+    echo "  },"
+done
+
+ansible-inventory -i "$INVENTORY_DIR/azure_rm.yml" --list 2>/dev/null | jq -r '.all.children // {} | keys[]' | while read group; do
+    echo "  \"azure_$group\": {"
+    ansible-inventory -i "$INVENTORY_DIR/azure_rm.yml" --list 2>/dev/null | jq -r ".\"$group\".hosts // []" | jq -r '.[]' | while read host; do
+        echo "    \"$host\""
+    done
+    echo "  },"
+done
+
+ansible-inventory -i "$INVENTORY_DIR/gcp_compute.yml" --list 2>/dev/null | jq -r '.all.children // {} | keys[]' | while read group; do
+    echo "  \"gcp_$group\": {"
+    ansible-inventory -i "$INVENTORY_DIR/gcp_compute.yml" --list 2>/dev/null | jq -r ".\"$group\".hosts // []" | jq -r '.[]' | while read host; do
+        echo "    \"$host\""
+    done
+    echo "  }"
+done
+
+echo "}"
+EOF
+
+chmod +x inventories/multi-cloud-inventory.sh
+Subtask 4.5: Test Dynamic Inventories
+Test each dynamic inventory to ensure proper functionality:
+
+# Test AWS dynamic inventory
+ansible-inventory -i inventories/aws_ec2.yml --list
+
+# Test Azure dynamic inventory
+ansible-inventory -i inventories/azure_rm.yml --list
+
+# Test GCP dynamic inventory
+ansible-inventory -i inventories/gcp_compute.yml --list
+
+# Test combined inventory
+ansible-inventory -i inventories/multi-cloud-inventory.sh --list
+Task 5: Execute Multi-Cloud Deployments
+Subtask 5.1: Deploy Infrastructure to All Clouds
+Execute the multi-cloud deployment:
+
+# Deploy to all clouds
+ansible-playbook playbooks/multi-cloud-deploy.yml
+
+# Deploy to specific cloud (using tags)
+ansible-playbook playbooks/multi-cloud-deploy.yml --tags aws
+ansible-playbook playbooks/multi-cloud-deploy.yml --tags azure
+ansible-playbook playbooks/multi-cloud-deploy.yml --tags gcp
+Subtask 5.2: Verify Dynamic Inventory Discovery
+After deployment, verify that dynamic inventories can discover the resources:
+
+# List all discovered hosts
+ansible-inventory -i inventories/aws_ec2.yml --list | jq '.all.hosts'
+ansible-inventory -i inventories/azure_rm.yml --list | jq '.all.hosts'
+ansible-inventory -i inventories/gcp_compute.yml --list | jq '.all.hosts'
+
+# Test connectivity to discovered hosts
+ansible all -i inventories/aws_ec2.yml -m ping
+ansible all -i inventories/azure_rm.yml -m ping
+ansible all -i inventories/gcp_compute.yml -m ping
+Subtask 5.3: Create Management Playbook
+Create a playbook to manage resources across all clouds:
+
+cat > playbooks/multi-cloud-manage.yml << 'EOF'
+---
+- name: Manage Multi-Cloud Infrastructure
+  hosts: all
+  gather_facts: true
+  become: yes
+  
+  tasks:
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Update package cache (RHEL/CentOS/Amazon Linux)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install common packages
+      package:
+        name:
+          - htop
+          - curl
+          - wget
+          - git
+        state: present
+
+    - name: Create a test file
+      copy:
+        content: |
+          This server is managed by Ansible
+          Cloud Provider: {{ group_names | select('match', 'cloud_.*') | first | default('unknown') }}
+          Hostname: {{ ansible_hostname }}
+          IP Address: {{ ansible_default_ipv4.address }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+        dest: /tmp/ansible-managed.txt
+        mode: '0644'
+
+    - name: Display system information
+      debug:
+        msg:
+          - "Hostname: {{ ansible_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "IP: {{ ansible_default_ipv4.address }}"
+          - "Cloud: {{ group_names | select('match', 'cloud_.*') | first | default('unknown') }}"
+EOF
+Subtask 5.4: Execute Management Tasks
+Run management tasks across all cloud resources:
+
+# Run management playbook on AWS instances
+ansible-playbook -i inventories/aws_ec2.yml playbooks/multi-cloud-manage.yml
+
+# Run management playbook on Azure instances
+ansible-playbook -i inventories/azure_rm.yml playbooks/multi-cloud-manage.yml
+
+# Run management playbook on GCP instances
+ansible-playbook -i inventories/gcp_compute.yml playbooks/multi-cloud-manage.yml
+Task 6: Advanced Multi-Cloud Operations
+Subtask 6.1: Create Cloud-Specific Group Variables
+Create group variables for each cloud provider:
+
+# AWS group variables
+mkdir -p group_vars/cloud_aws
+cat > group_vars/cloud_aws/main.yml << 'EOF'
+---
+cloud_provider: aws
+package_manager: "{{ 'yum' if ansible_os_family == 'RedHat' else 'apt' }}"
+web_server: nginx
+monitoring_agent: cloudwatch
+backup_schedule: "0 2 * * *"
+EOF
+
+# Azure group variables
+mkdir -p group_vars/cloud_azure
+cat > group_vars/cloud_azure/main.yml << 'EOF'
+---
+cloud_provider: azure
+package_manager: apt
+web_server: apache2
+monitoring_agent: azure-monitor
+backup_schedule: "0 3 * * *"
+EOF
+
+# GCP group variables
+mkdir -p group_vars/cloud_gcp
+cat > group_vars/cloud_gcp/main.yml << 'EOF'
+---
+cloud_provider: gcp
+package_manager: apt
+web_server: nginx
+monitoring_agent: stackdriver
+backup_schedule: "0 4 * * *"
+EOF
+Subtask 6.2: Create Cleanup Playbook
+Create a playbook to clean up resources across all clouds:
+
+cat > playbooks/multi-cloud-cleanup.yml << 'EOF'
+---
+- name: Cleanup AWS Resources
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Terminate AWS EC2 instances
+      amazon.aws.ec2_instance:
+        filters:
+          "tag:ManagedBy": ansible
+          instance-state-name: running
+        state: terminated
+        region: us-east-1
+
+    - name: Delete AWS security group
+      amazon.aws.ec2_security_group:
+        name: ansible-sg
+        region: us-east-1
+        state: absent
+
+    - name: Delete AWS key pair
+      amazon.aws.ec2_key:
+        name: ansible-key
+        region: us-east-1
+        state: absent
+
+- name: Cleanup Azure Resources
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../credentials/azure_credentials.yml
+  tasks:
+    - name: Delete Azure resource group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: ansible-rg
+        state: absent
+        force_delete_nonempty: true
+
+- name: Cleanup GCP Resources
+  hosts: localhost
+  gather_facts: false
+  vars:
+    project_id: YOUR_PROJECT_ID
+    zone: us-central1-a
+  tasks:
+    - name: Delete GCP compute instance
+      google.cloud.gcp_compute_instance:
+        name: ansible-gcp-instance
+        zone: "{{ zone }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: absent
+
+    - name: Delete GCP firewall rules
+      google.cloud.gcp_compute_firewall:
+        name: "{{ item }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: absent
+      loop:
+        - ansible-ssh-firewall
+        - ansible-http-firewall
+EOF
+Troubleshooting Common Issues
+Authentication Problems
+If you encounter authentication issues:
+
+# Verify AWS credentials
+aws sts get-caller-identity
+
+# Verify Azure login
+az account show
+
+# Verify GCP authentication
+gcloud auth list
+gcloud config list project
+Dynamic Inventory Issues
+If dynamic inventories are not working:
+
+# Check inventory plugins
+ansible-doc -t inventory -l
+
+# Test inventory with verbose output
+ansible-inventory -i inventories/aws_ec2.yml --list -vvv
+
+# Verify cloud SDK installations
+pip list | grep -E "(boto3|azure|google)"
+Network Connectivity Issues
+If you cannot connect to instances:
+
+# Check security group rules
+# Verify SSH key permissions
+chmod 600 ~/multi-cloud-lab/credentials/*-key*
+
+# Test direct SSH connection
+ssh -i ~/multi-cloud-lab/credentials/aws-key.pem ec2-user@INSTANCE_IP
+Verification and Testing
+Test Multi-Cloud Connectivity
+Create a comprehensive test script:
+
+cat > test-multi-cloud.sh << 'EOF'
+#!/bin/bash
+
+echo "Testing Multi-Cloud Infrastructure..."
+
+# Test AWS connectivity
+echo "Testing AWS instances..."
+ansible all -i inventories/aws_ec2.yml -m ping --one-line
+
+# Test Azure connectivity
+echo "Testing Azure instances..."
+ansible all -i inventories/azure_rm.yml -m ping --one-line
+
+# Test GCP connectivity
+echo "Testing GCP instances..."
+ansible all -i inventories/gcp_compute.yml -m ping --one-line
+
+# Gather facts from all clouds
+echo "Gathering facts from all clouds..."
+ansible all -i inventories/aws_ec2.yml -m setup --tree /tmp/facts/aws/
+ansible all -i inventories/azure_rm.yml -m setup --tree /tmp/facts/azure/
+ansible all -i inventories/gcp_compute.yml -m setup --tree /tmp/facts/gcp/
+
+echo "Multi-cloud testing completed!"
+EOF
+
+chmod +x test-multi-cloud.sh
+./test-multi-cloud.sh
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Installed and configured Ansible for multi-cloud infrastructure management with all necessary dependencies and cloud provider collections
+Set up authentication for AWS, Azure, and Google Cloud Platform using service accounts and API keys
+Created sophisticated Ansible playbooks that can provision virtual machines, networks, and security groups across multiple cloud providers
+Implemented dynamic inventories that automatically discover and categorize cloud resources using cloud-specific plugins
+Executed multi-cloud deployments using Infrastructure as Code principles with proper error handling and resource tagging
+Developed management workflows for ongoing operations across heterogeneous cloud environments
+This lab demonstrates the power of Ansible as a unified automation platform for multi-cloud environments. The skills you have developed enable you to:
+
+Manage infrastructure consistency across different
