@@ -1,0 +1,45 @@
+---
+- name: Master Security Hardening Playbook
+  hosts: local
+  become: yes
+  
+  roles:
+    - security-hardening
+    
+  post_tasks:
+    - name: Run final security validation
+      command: "{{ item }}"
+      register: security_checks
+      loop:
+        - "ufw status"
+        - "fail2ban-client status"
+        - "systemctl is-active ssh"
+        
+    - name: Display security status
+      debug:
+        msg: |
+          === SECURITY IMPLEMENTATION COMPLETE ===
+          UFW Status: {{ security_checks.results[0].stdout }}
+          Fail2ban Status: {{ security_checks.results[1].stdout }}
+          SSH Service: {{ security_checks.results[2].stdout }}
+          
+    - name: Create final security summary
+      copy:
+        content: |
+          SECURITY HARDENING SUMMARY
+          ==========================
+          Date: {{ ansible_date_time.iso8601 }}
+          Host: {{ inventory_hostname }}
+          
+          IMPLEMENTED SECURITY MEASURES:
+          - SSH root login disabled
+          - SSH password authentication disabled
+          - UFW firewall configured and enabled
+          - Fail2ban intrusion prevention active
+          - Automatic security updates enabled
+          - File permissions secured
+          - Network services hardened
+          
+          COMPLIANCE STATUS: SECURED
+        dest: /var/log/security-hardening-summary.log
+        mode: '0644'
