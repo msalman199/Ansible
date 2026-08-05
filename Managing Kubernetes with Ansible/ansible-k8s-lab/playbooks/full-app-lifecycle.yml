@@ -1,0 +1,134 @@
+---
+- name: Complete Application Lifecycle Management
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    service_name: "nginx-service"
+    app_image: "nginx:1.21"
+    replica_count: 3
+    action: "deploy"  # Options: deploy, scale, update, delete
+    new_replica_count: 4
+    new_image: "nginx:1.22"
+  
+  tasks:
+    - name: Create namespace if it doesn't exist
+      kubernetes.core.k8s:
+        name: "{{ namespace_name }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+      when: action in ['deploy', 'scale', 'update']
+    
+    - name: Deploy application
+      block:
+        - name: Create deployment
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: "{{ app_name }}"
+                namespace: "{{ namespace_name }}"
+                labels:
+                  app: "{{ app_name }}"
+              spec:
+                replicas: "{{ replica_count }}"
+                selector:
+                  matchLabels:
+                    app: "{{ app_name }}"
+                template:
+                  metadata:
+                    labels:
+                      app: "{{ app_name }}"
+                  spec:
+                    containers:
+                    - name: "{{ app_name }}"
+                      image: "{{ app_image }}"
+                      ports:
+                      - containerPort: 80
+        
+        - name: Create service
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: "{{ service_name }}"
+                namespace: "{{ namespace_name }}"
+              spec:
+                type: ClusterIP
+                ports:
+                - port: 80
+                  targetPort: 80
+                selector:
+                  app: "{{ app_name }}"
+      when: action == 'deploy'
+    
+    - name: Scale application
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+          spec:
+            replicas: "{{ new_replica_count }}"
+      when: action == 'scale'
+    
+    - name: Update application image
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+          spec:
+            template:
+              spec:
+                containers:
+                - name: "{{ app_name }}"
+                  image: "{{ new_image }}"
+                  ports:
+                  - containerPort: 80
+      when: action == 'update'
+    
+    - name: Delete application
+      block:
+        - name: Delete deployment
+          kubernetes.core.k8s:
+            state: absent
+            api_version: apps/v1
+            kind: Deployment
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+        
+        - name: Delete service
+          kubernetes.core.k8s:
+            state: absent
+            api_version: v1
+            kind: Service
+            name: "{{ service_name }}"
+            namespace: "{{ namespace_name }}"
+      when: action == 'delete'
+    
+    - name: Get application status
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+      register: app_status
+      when: action != 'delete'
+    
+    - name: Display application status
+      debug:
+        msg: "Application {{ app_name }} has {{ app_status.resources[0].status.readyReplicas | default(0) }} ready replicas"
+      when: action != 'delete' and app_status.resources | length > 0
