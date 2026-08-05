@@ -1,0 +1,53 @@
+---
+- name: Verify AWS Infrastructure
+  hosts: localhost
+  gather_facts: no
+  vars:
+    region: "us-east-1"
+    security_group_name: "ansible-lab-sg"
+    instance_name: "ansible-provisioned-instance"
+  
+  tasks:
+    - name: Get security group information
+      amazon.aws.ec2_security_group_info:
+        group_names:
+          - "{{ security_group_name }}"
+        region: "{{ region }}"
+      register: sg_info
+    
+    - name: Get EC2 instance information
+      amazon.aws.ec2_instance_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+          "instance-state-name": "running"
+      register: instance_info
+    
+    - name: Display security group details
+      debug:
+        msg:
+          - "Security Group Name: {{ sg_info.security_groups[0].group_name }}"
+          - "Security Group ID: {{ sg_info.security_groups[0].group_id }}"
+          - "Inbound Rules: {{ sg_info.security_groups[0].ip_permissions | length }}"
+    
+    - name: Display instance details
+      debug:
+        msg:
+          - "Instance Name: {{ instance_info.instances[0].tags.Name }}"
+          - "Instance ID: {{ instance_info.instances[0].instance_id }}"
+          - "Instance Type: {{ instance_info.instances[0].instance_type }}"
+          - "Public IP: {{ instance_info.instances[0].public_ip_address }}"
+          - "State: {{ instance_info.instances[0].state.name }}"
+      when: instance_info.instances | length > 0
+    
+    - name: Test SSH connectivity
+      wait_for:
+        host: "{{ instance_info.instances[0].public_ip_address }}"
+        port: 22
+        timeout: 60
+      when: instance_info.instances | length > 0
+    
+    - name: SSH connection test result
+      debug:
+        msg: "SSH port 22 is accessible on {{ instance_info.instances[0].public_ip_address }}"
+      when: instance_info.instances | length > 0
