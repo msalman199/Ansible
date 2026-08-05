@@ -1,0 +1,28 @@
+---
+- name: Multi-Cloud Infrastructure Deployment
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Deploy AWS Infrastructure
+      include: aws-provision.yml
+      tags: aws
+
+    - name: Deploy Azure Infrastructure
+      include: azure-provision.yml
+      tags: azure
+
+    - name: Deploy GCP Infrastructure
+      include: gcp-provision.yml
+      tags: gcp
+
+    - name: Wait for all instances to be ready
+      pause:
+        seconds: 30
+
+    - name: Display deployment summary
+      debug:
+        msg:
+          - "Multi-cloud deployment completed successfully!"
+          - "AWS, Azure, and GCP instances have been provisioned."
+          - "Use dynamic inventories to manage these resources."
