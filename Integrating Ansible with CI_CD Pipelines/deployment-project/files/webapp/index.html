@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CI/CD Deployment Success</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+        .success { color: green; font-size: 24px; }
+        .info { color: blue; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1 class="success">Application Deployed Successfully!</h1>
+    <p class="info">Deployed via Jenkins + Ansible CI/CD Pipeline</p>
+    <p>Build Number: {{ build_number | default('Unknown') }}</p>
+    <p>Deployment Time: {{ ansible_date_time.iso8601 }}</p>
+</body>
+</html>
