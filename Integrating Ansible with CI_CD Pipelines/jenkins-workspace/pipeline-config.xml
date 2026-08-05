@@ -1,0 +1,113 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>CI/CD Pipeline with Ansible Deployment</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>
+pipeline {
+    agent any
+    
+    environment {
+        ANSIBLE_HOST_KEY_CHECKING = 'False'
+        PROJECT_DIR = '/var/lib/jenkins/deployment-project'
+    }
+    
+    stages {
+        stage('Preparation') {
+            steps {
+                echo 'Preparing deployment environment...'
+                sh '''
+                    cd ${PROJECT_DIR}
+                    echo "Current directory: $(pwd)"
+                    echo "Available files:"
+                    ls -la
+                '''
+            }
+        }
+        
+        stage('Syntax Check') {
+            steps {
+                echo 'Checking Ansible playbook syntax...'
+                sh '''
+                    cd ${PROJECT_DIR}
+                    ansible-playbook --syntax-check playbooks/deploy-webapp.yml
+                '''
+            }
+        }
+        
+        stage('Deploy Application') {
+            steps {
+                echo 'Deploying application with Ansible...'
+                sh '''
+                    cd ${PROJECT_DIR}
+                    ansible-playbook -i inventory/hosts playbooks/deploy-webapp.yml -v
+                '''
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                echo 'Verifying deployment...'
+                sh '''
+                    sleep 10
+                    if curl -s http://localhost | grep -q "Application Deployed Successfully"; then
+                        echo "✓ Deployment verification: SUCCESS"
+                        echo "✓ Application is accessible at http://localhost"
+                    else
+                        echo "✗ Deployment verification: FAILED"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                echo 'Performing health check...'
+                sh '''
+                    # Check nginx status
+                    sudo systemctl is-active nginx
+                    
+                    # Check if port 80 is listening
+                    sudo netstat -tlnp | grep :80 || echo "Port 80 not listening"
+                    
+                    # Test HTTP response
+                    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost)
+                    if [ "$HTTP_CODE" = "200" ]; then
+                        echo "✓ HTTP Health Check: PASSED (Status: $HTTP_CODE)"
+                    else
+                        echo "✗ HTTP Health Check: FAILED (Status: $HTTP_CODE)"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+            sh 'echo "Deployment completed at $(date)"'
+        }
+        failure {
+            echo 'Pipeline failed!'
+            sh '''
+                echo "Pipeline failed at $(date)"
+                echo "Checking system status..."
+                sudo systemctl status nginx --no-pager
+            '''
+        }
+        always {
+            echo 'Cleaning up...'
+            sh 'echo "Build #${BUILD_NUMBER} finished"'
+        }
+    }
+}
+    </script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
