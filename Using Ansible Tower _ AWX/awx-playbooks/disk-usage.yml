@@ -1,0 +1,28 @@
+---
+- name: Disk Usage Report
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Check disk usage
+      shell: df -h
+      register: disk_usage
+
+    - name: Display disk usage
+      debug:
+        msg: "{{ disk_usage.stdout_lines }}"
+
+    - name: Check memory usage
+      shell: free -h
+      register: memory_usage
+
+    - name: Display memory usage
+      debug:
+        msg: "{{ memory_usage.stdout_lines }}"
+
+    - name: List running processes
+      shell: ps aux | head -10
+      register: processes
+
+    - name: Display top processes
+      debug:
+        msg: "{{ processes.stdout_lines }}"
