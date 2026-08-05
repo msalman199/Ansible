@@ -1,0 +1,67 @@
+---
+- name: Manage Kubernetes Deployments
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    app_image: "nginx:1.21"
+    replica_count: 3
+    app_port: 80
+  
+  tasks:
+    - name: Create deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+            labels:
+              app: "{{ app_name }}"
+          spec:
+            replicas: "{{ replica_count }}"
+            selector:
+              matchLabels:
+                app: "{{ app_name }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ app_name }}"
+              spec:
+                containers:
+                - name: "{{ app_name }}"
+                  image: "{{ app_image }}"
+                  ports:
+                  - containerPort: "{{ app_port }}"
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "50m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "100m"
+      register: deployment_result
+    
+    - name: Display deployment creation result
+      debug:
+        msg: "Deployment {{ app_name }} created/updated successfully"
+    
+    - name: Wait for deployment to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: deployment_status
+    
+    - name: Display deployment status
+      debug:
+        msg: "Deployment is ready with {{ deployment_status.resources[0].status.readyReplicas }} ready replicas"
