@@ -1,0 +1,401 @@
+Using Ansible Tower / AWX
+Lab Objectives
+By the end of this lab, you will be able to:
+
+Install and configure AWX (the open-source version of Ansible Tower) on a Linux system
+Set up a project in AWX to manage Ansible playbooks
+Create and configure an inventory to manage target hosts
+Launch and monitor automation jobs through the AWX web interface
+Understand the benefits of centralized automation management
+Navigate the AWX dashboard and key features
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Linux command line operations
+Familiarity with Ansible concepts (playbooks, inventories, modules)
+Knowledge of YAML syntax
+Understanding of basic networking concepts
+Experience with text editors like nano or vim
+Lab Environment
+Al Nafi provides you with a ready-to-use Linux-based cloud machine. Simply click Start Lab to access your environment. The provided Linux machine is bare metal with no pre-installed tools, so you will install all required components during this lab.
+
+Important Note: All tasks in this lab will be performed on a single Linux machine. We will simulate multiple hosts by using localhost and different user contexts.
+
+Task 1: Install AWX (Ansible Tower Open Source)
+Subtask 1.1: Prepare the System
+First, let's update the system and install required dependencies.
+
+# Update the system
+sudo apt update && sudo apt upgrade -y
+
+# Install required packages
+sudo apt install -y curl wget git python3 python3-pip docker.io docker-compose
+
+# Start and enable Docker
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Add current user to docker group
+sudo usermod -aG docker $USER
+
+# Apply group changes (logout and login, or use newgrp)
+newgrp docker
+Subtask 1.2: Install Docker Compose
+# Download and install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+
+# Make it executable
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Verify installation
+docker-compose --version
+Subtask 1.3: Clone AWX Repository
+# Clone the AWX repository
+cd /home/$USER
+git clone https://github.com/ansible/awx.git
+cd awx
+
+# Switch to the latest stable release
+git checkout $(git describe --tags $(git rev-list --tags --max-count=1))
+Subtask 1.4: Install AWX using Docker Compose
+# Navigate to the tools/docker-compose directory
+cd tools/docker-compose
+
+# Generate a secret key
+python3 -c "import secrets; print(secrets.token_urlsafe(50))" > .awx_secret_key
+
+# Create inventory file for AWX installation
+cat > inventory << 'EOF'
+localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env python3"
+
+[all:vars]
+dockerhub_base=ansible
+awx_task_hostname=awx
+awx_web_hostname=awxweb
+postgres_data_dir="~/.awx/pgdocker"
+host_port=80
+host_port_ssl=443
+docker_compose_dir="~/.awx/awxcompose"
+pg_username=awx
+pg_password=awxpass
+pg_database=awx
+pg_port=5432
+admin_user=admin
+admin_password=password
+create_preload_data=True
+secret_key_file=.awx_secret_key
+EOF
+Subtask 1.5: Deploy AWX
+# Install Ansible if not already installed
+pip3 install ansible
+
+# Run the AWX installation playbook
+ansible-playbook -i inventory install.yml
+
+# Wait for containers to start (this may take several minutes)
+echo "Waiting for AWX to start..."
+sleep 60
+
+# Check if containers are running
+docker ps
+Subtask 1.6: Verify AWX Installation
+# Check AWX container logs
+docker logs awx_task
+
+# Wait for AWX to be fully ready
+echo "Waiting for AWX web interface to be ready..."
+until curl -s http://localhost > /dev/null; do
+    echo "Still waiting..."
+    sleep 10
+done
+
+echo "AWX is ready! Access it at http://localhost"
+echo "Default credentials: admin / password"
+Task 2: Set Up a Project and Create an Inventory
+Subtask 2.1: Access AWX Web Interface
+Open a web browser and navigate to http://localhost
+Log in with the default credentials:
+Username: admin
+Password: password
+Subtask 2.2: Create a Sample Playbook Repository
+First, let's create a local Git repository with sample playbooks:
+
+# Create a directory for our playbooks
+mkdir -p /home/$USER/awx-playbooks
+cd /home/$USER/awx-playbooks
+
+# Initialize Git repository
+git init
+
+# Create a simple playbook
+cat > site.yml << 'EOF'
+---
+- name: System Information Gathering
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display system information
+      debug:
+        msg: |
+          Hostname: {{ ansible_hostname }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Architecture: {{ ansible_architecture }}
+          Memory: {{ ansible_memtotal_mb }} MB
+
+    - name: Create a test file
+      file:
+        path: /tmp/awx-test-{{ ansible_date_time.epoch }}
+        state: touch
+        mode: '0644'
+      register: file_created
+
+    - name: Show created file
+      debug:
+        msg: "Created file: {{ file_created.dest }}"
+
+    - name: Get current date
+      command: date
+      register: current_date
+
+    - name: Display current date
+      debug:
+        msg: "Current date and time: {{ current_date.stdout }}"
+EOF
+
+# Create an inventory file
+cat > inventory.ini << 'EOF'
+[local]
+localhost ansible_connection=local
+
+[local:vars]
+ansible_python_interpreter=/usr/bin/python3
+EOF
+
+# Create a requirements file
+cat > requirements.yml << 'EOF'
+---
+# No external requirements for this simple example
+EOF
+
+# Add files to git
+git add .
+git config user.email "student@example.com"
+git config user.name "AWX Student"
+git commit -m "Initial commit with sample playbook"
+Subtask 2.3: Create a Project in AWX
+In the AWX web interface, click on Projects in the left sidebar
+Click the + button to add a new project
+Fill in the project details:
+Name: Sample Playbooks
+Description: Sample playbooks for AWX demonstration
+Organization: Default
+SCM Type: Git
+SCM URL: /home/$USER/awx-playbooks (local path)
+SCM Branch/Tag/Commit: master
+Check Update Revision on Launch
+Click Save
+Note: Since we're using a local repository, AWX will access it directly from the filesystem.
+
+Subtask 2.4: Create an Inventory
+Click on Inventories in the left sidebar
+Click the + button and select Inventory
+Fill in the inventory details:
+Name: Local Inventory
+Description: Inventory for local host management
+Organization: Default
+Click Save
+Subtask 2.5: Add Hosts to Inventory
+After creating the inventory, click on it to open the details
+Click on the Hosts tab
+Click the + button to add a host
+Fill in the host details:
+Host Name: localhost
+Description: Local machine
+In the Variables section, add:
+ansible_connection: local
+ansible_python_interpreter: /usr/bin/python3
+Click Save
+Subtask 2.6: Create a Group (Optional)
+In the inventory, click on the Groups tab
+Click the + button to add a group
+Fill in the group details:
+Name: local_servers
+Description: Local server group
+Click Save
+Click on the group, then go to Hosts tab
+Click + and select Existing Host
+Select localhost and click Save
+Task 3: Launch Jobs from the Tower UI
+Subtask 3.1: Create a Job Template
+Click on Templates in the left sidebar
+Click the + button and select Job Template
+Fill in the template details:
+Name: System Info Job
+Description: Gather system information from local host
+Job Type: Run
+Inventory: Local Inventory
+Project: Sample Playbooks
+Playbook: site.yml
+Credentials: Leave empty (using local connection)
+Under Options, check:
+Enable Privilege Escalation (if needed)
+Enable Fact Storage
+Click Save
+Subtask 3.2: Launch Your First Job
+From the Templates page, find your System Info Job template
+Click the Launch button (rocket icon)
+The job will start immediately and you'll be redirected to the job details page
+Watch the job execution in real-time:
+Status: Shows current job status
+Output: Shows live output from the playbook execution
+Details: Shows job metadata
+Subtask 3.3: Monitor Job Execution
+Observe the job output as it runs
+Note the different sections:
+PLAY RECAP: Summary of task results
+Task details: Individual task execution
+Timing information: How long each task took
+Subtask 3.4: View Job History
+Click on Jobs in the left sidebar
+You'll see a list of all executed jobs
+Click on your completed job to view details
+Explore different tabs:
+Details: Job metadata and settings
+Output: Complete job output
+Facts: Gathered facts (if fact caching is enabled)
+Subtask 3.5: Create and Launch a Second Job Template
+Let's create another playbook and job template:
+
+# Create another playbook
+cd /home/$USER/awx-playbooks
+
+cat > disk-usage.yml << 'EOF'
+---
+- name: Disk Usage Report
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Check disk usage
+      shell: df -h
+      register: disk_usage
+
+    - name: Display disk usage
+      debug:
+        msg: "{{ disk_usage.stdout_lines }}"
+
+    - name: Check memory usage
+      shell: free -h
+      register: memory_usage
+
+    - name: Display memory usage
+      debug:
+        msg: "{{ memory_usage.stdout_lines }}"
+
+    - name: List running processes
+      shell: ps aux | head -10
+      register: processes
+
+    - name: Display top processes
+      debug:
+        msg: "{{ processes.stdout_lines }}"
+EOF
+
+# Commit the new playbook
+git add disk-usage.yml
+git commit -m "Add disk usage playbook"
+Now create a new job template in AWX:
+
+Go to Templates and click + → Job Template
+Fill in the details:
+Name: Disk Usage Report
+Description: Generate system resource usage report
+Job Type: Run
+Inventory: Local Inventory
+Project: Sample Playbooks
+Playbook: disk-usage.yml
+Click Save
+Launch the job and observe the output
+Subtask 3.6: Schedule a Job (Optional)
+Go to your System Info Job template
+Click Schedules tab
+Click + to add a schedule
+Fill in schedule details:
+Name: Daily System Check
+Start Date/Time: Set to current time + 2 minutes
+Repeat Frequency: Run Every → Minute
+Interval: 5 (runs every 5 minutes)
+Click Save
+Note: For demonstration purposes, we set a short interval. In production, you'd typically use longer intervals.
+
+Subtask 3.7: Explore AWX Dashboard
+Click on Dashboard in the left sidebar
+Explore the different widgets:
+Job Status: Recent job execution status
+Recent Jobs: List of recently run jobs
+Recent Templates: Recently used templates
+Note how the dashboard provides a quick overview of your automation activities
+Troubleshooting Tips
+Common Issues and Solutions
+Issue: AWX containers not starting
+
+# Check Docker service
+sudo systemctl status docker
+
+# Check container logs
+docker logs awx_web
+docker logs awx_task
+
+# Restart containers if needed
+cd /home/$USER/awx/tools/docker-compose
+docker-compose restart
+Issue: Cannot access AWX web interface
+
+# Check if port 80 is being used
+sudo netstat -tlnp | grep :80
+
+# Check AWX container status
+docker ps | grep awx
+
+# Wait longer for AWX to fully initialize
+sleep 120
+Issue: Project sync fails
+
+Ensure the Git repository path is correct
+Check that the playbook files exist in the repository
+Verify Git repository is properly initialized
+Issue: Job fails with permission errors
+
+Check if privilege escalation is needed
+Verify the ansible_connection and ansible_python_interpreter variables
+Ensure the target user has necessary permissions
+Key Concepts Learned
+AWX Architecture
+AWX Web: Provides the web interface and API
+AWX Task: Executes the actual automation jobs
+PostgreSQL: Stores AWX configuration and job data
+Redis: Handles message queuing and caching
+AWX Components
+Projects: Link to your playbook repositories
+Inventories: Define your target hosts and groups
+Templates: Define how jobs should be executed
+Jobs: Individual execution instances of templates
+Credentials: Store authentication information securely
+Benefits of AWX
+Centralized Management: Single interface for all automation
+Role-Based Access Control: Control who can run what
+Job Scheduling: Automate routine tasks
+Audit Trail: Track all automation activities
+Scalability: Handle large-scale automation deployments
+Conclusion
+In this lab, you successfully:
+
+Installed AWX: Set up the open-source version of Ansible Tower using Docker containers
+Created Projects: Linked AWX to your playbook repositories for centralized code management
+Built Inventories: Defined target hosts and organized them into logical groups
+Launched Jobs: Executed automation tasks through the intuitive web interface
+Monitored Execution: Tracked job progress and reviewed results in real-time
+AWX transforms Ansible from a command-line tool into an enterprise-ready automation platform. It provides the centralized control, security, and scalability needed for managing automation at scale. The web interface makes automation accessible to team members who may not be comfortable with command-line tools, while still providing the power and flexibility that makes Ansible so popular.
+
+This foundation prepares you for more advanced AWX features like workflow templates, custom credentials, notifications, and integration with external systems. In production environments, AWX becomes the central hub for all automation activities, providing visibility, control, and governance over your infrastructure automation initiatives.
+
+The skills you've developed in this lab are directly applicable to Red Hat Ansible Tower, the commercial version of this platform, making this knowledge valuable for both open-source and enterprise environments.
