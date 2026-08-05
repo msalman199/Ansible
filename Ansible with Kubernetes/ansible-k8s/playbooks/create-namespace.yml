@@ -1,0 +1,16 @@
+---
+- name: Create Kubernetes Namespace
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create ansible-demo namespace
+      kubernetes.core.k8s:
+        name: ansible-demo
+        api_version: v1
+        kind: Namespace
+        state: present
+      register: namespace_result
+
+    - name: Display namespace creation result
+      debug:
+        msg: "Namespace created: {{ namespace_result.result.metadata.name }}"
