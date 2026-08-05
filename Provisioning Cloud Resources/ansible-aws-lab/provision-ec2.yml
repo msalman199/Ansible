@@ -1,0 +1,47 @@
+---
+- name: Provision EC2 Instance
+  hosts: localhost
+  gather_facts: no
+  vars:
+    region: "us-east-1"
+    instance_type: "t2.micro"
+    ami_id: "ami-0c02fb55956c7d316"  # Amazon Linux 2 AMI
+    key_name: "ansible-lab-keypair"
+    security_group_name: "ansible-lab-sg"
+    instance_name: "ansible-provisioned-instance"
+  
+  tasks:
+    - name: Launch EC2 instance
+      amazon.aws.ec2_instance:
+        name: "{{ instance_name }}"
+        image_id: "{{ ami_id }}"
+        instance_type: "{{ instance_type }}"
+        key_name: "{{ key_name }}"
+        security_groups:
+          - "{{ security_group_name }}"
+        region: "{{ region }}"
+        state: present
+        wait: true
+        wait_timeout: 300
+        tags:
+          Environment: "Lab"
+          Project: "Ansible-AWS-Lab"
+          Owner: "Student"
+      register: ec2_result
+    
+    - name: Display instance information
+      debug:
+        msg: 
+          - "Instance ID: {{ ec2_result.instances[0].instance_id }}"
+          - "Public IP: {{ ec2_result.instances[0].public_ip_address }}"
+          - "Private IP: {{ ec2_result.instances[0].private_ip_address }}"
+          - "State: {{ ec2_result.instances[0].state.name }}"
+    
+    - name: Save instance information to file
+      copy:
+        content: |
+          Instance ID: {{ ec2_result.instances[0].instance_id }}
+          Public IP: {{ ec2_result.instances[0].public_ip_address }}
+          Private IP: {{ ec2_result.instances[0].private_ip_address }}
+          State: {{ ec2_result.instances[0].state.name }}
+        dest: ./instance-info.txt
