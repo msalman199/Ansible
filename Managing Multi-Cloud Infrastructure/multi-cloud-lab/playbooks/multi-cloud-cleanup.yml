@@ -1,0 +1,63 @@
+---
+- name: Cleanup AWS Resources
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Terminate AWS EC2 instances
+      amazon.aws.ec2_instance:
+        filters:
+          "tag:ManagedBy": ansible
+          instance-state-name: running
+        state: terminated
+        region: us-east-1
+
+    - name: Delete AWS security group
+      amazon.aws.ec2_security_group:
+        name: ansible-sg
+        region: us-east-1
+        state: absent
+
+    - name: Delete AWS key pair
+      amazon.aws.ec2_key:
+        name: ansible-key
+        region: us-east-1
+        state: absent
+
+- name: Cleanup Azure Resources
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../credentials/azure_credentials.yml
+  tasks:
+    - name: Delete Azure resource group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: ansible-rg
+        state: absent
+        force_delete_nonempty: true
+
+- name: Cleanup GCP Resources
+  hosts: localhost
+  gather_facts: false
+  vars:
+    project_id: YOUR_PROJECT_ID
+    zone: us-central1-a
+  tasks:
+    - name: Delete GCP compute instance
+      google.cloud.gcp_compute_instance:
+        name: ansible-gcp-instance
+        zone: "{{ zone }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: absent
+
+    - name: Delete GCP firewall rules
+      google.cloud.gcp_compute_firewall:
+        name: "{{ item }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: absent
+      loop:
+        - ansible-ssh-firewall
+        - ansible-http-firewall
