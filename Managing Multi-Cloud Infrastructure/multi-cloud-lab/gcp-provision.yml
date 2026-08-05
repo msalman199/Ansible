@@ -1,0 +1,86 @@
+---
+- name: Provision GCP Compute Instance
+  hosts: localhost
+  gather_facts: false
+  vars:
+    project_id: YOUR_PROJECT_ID
+    zone: us-central1-a
+    region: us-central1
+    instance_name: ansible-gcp-instance
+    machine_type: e2-micro
+    
+  tasks:
+    - name: Create firewall rule for SSH
+      google.cloud.gcp_compute_firewall:
+        name: ansible-ssh-firewall
+        allowed:
+          - ip_protocol: tcp
+            ports:
+              - '22'
+        source_ranges:
+          - '0.0.0.0/0'
+        target_tags:
+          - ansible-managed
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: present
+
+    - name: Create firewall rule for HTTP
+      google.cloud.gcp_compute_firewall:
+        name: ansible-http-firewall
+        allowed:
+          - ip_protocol: tcp
+            ports:
+              - '80'
+        source_ranges:
+          - '0.0.0.0/0'
+        target_tags:
+          - ansible-managed
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        state: present
+
+    - name: Generate SSH key pair for GCP
+      openssh_keypair:
+        path: "~/multi-cloud-lab/credentials/gcp-key"
+        size: 2048
+      register: gcp_ssh_key
+
+    - name: Create compute instance
+      google.cloud.gcp_compute_instance:
+        name: "{{ instance_name }}"
+        machine_type: "zones/{{ zone }}/machineTypes/{{ machine_type }}"
+        zone: "{{ zone }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ ansible_env.GOOGLE_APPLICATION_CREDENTIALS }}"
+        disks:
+          - auto_delete: true
+            boot: true
+            initialize_params:
+              source_image: projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts
+        network_interfaces:
+          - access_configs:
+              - name: External NAT
+                type: ONE_TO_ONE_NAT
+        tags:
+          items:
+            - ansible-managed
+        labels:
+          environment: lab
+          managed-by: ansible
+          cloud: gcp
+        metadata:
+          ssh-keys: "ubuntu:{{ gcp_ssh_key.public_key }}"
+        state: present
+      register: gcp_instance
+
+    - name: Display GCP instance information
+      debug:
+        msg:
+          - "Instance Name: {{ gcp_instance.name }}"
+          - "External IP: {{ gcp_instance.network_interfaces[0].access_configs[0].nat_ip }}"
+          - "Internal IP: {{ gcp_instance.network_interfaces[0].network_ip }}"
+          - "Zone: {{ gcp_instance.zone }}"
