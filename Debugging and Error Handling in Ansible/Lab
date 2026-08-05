@@ -1,0 +1,64 @@
+Debugging and Error Handling in Ansible
+Objectives
+Design and implement multi-layered Ansible playbooks that use the debug, fail, and block/rescue/always modules to surface and handle errors explicitly
+Build retry logic using retries, delay, and until conditions for tasks that interact with unreliable external resources
+Construct a production-style deployment playbook that validates preconditions, handles failures gracefully, and produces structured log output
+Prerequisites
+Comfort with the Ubuntu command line, including file editing, directory navigation, and reading command output
+Familiarity with YAML syntax and basic Ansible concepts such as playbooks, tasks, variables, and inventory
+Lab Environment
+You will work on a dedicated AWS EC2 Ubuntu instance provided by Al Nafi. The instance has a base Ubuntu installation; you will install all required tools in Task 1.
+
+Task 1: Environment Setup and Verification
+Step 1: Install Python, pip, and Ansible; then configure a local inventory and ansible.cfg
+Install all required tooling from the Ubuntu package index and pip, then verify each tool reports a usable version. Create a working directory at ~/ansible-debug-lab/ containing subdirectories playbooks/, inventory/, and logs/. Write an ansible.cfg in the project root that sets the inventory path, disables host key checking, sets the yaml stdout callback, and writes logs to logs/ansible.log. Write an inventory file that targets localhost using a local connection and the system Python 3 interpreter.
+
+Confirmation: Running ansible --version prints a version line, and running ansible -m ping localhost against your inventory returns pong with no errors.
+
+Troubleshoot this step:
+
+You may see ERROR! Unexpected Exception, this is probably a bug: No module named 'ansible' if pip installed Ansible into a path not on $PATH.
+Run python3 -m pip show ansible to find the install location, then add its bin/ directory to your PATH with export PATH="$HOME/.local/bin:$PATH" and add that line to ~/.bashrc.
+Official installation reference: https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+Step 2: Confirm the project layout and Ansible configuration are correct
+Run ansible-config dump --only-changed and confirm it reflects the values you set in ansible.cfg. Run ansible-inventory --list and confirm it shows localhost under the group you defined.
+
+Confirmation: Both commands exit with code 0 and their output matches the values you wrote into ansible.cfg and the inventory file.
+
+Task 2: Debug Module Mastery and Controlled Failure Design
+Problem Statement
+Design and implement a playbook suite that demonstrates systematic use of Ansible's debugging and failure primitives. You are given no templates. You must decide the structure, variable layout, and task sequencing entirely.
+
+Requirement 1: Design a playbook named debug-and-fail.yml that declares at least six variables of mixed types (string, integer, boolean, list, dictionary, and a variable populated by a register from a shell command). The playbook must use the debug module in at least four distinct ways: printing a raw variable with var:, printing a formatted string with msg:, printing only when a condition is true with when:, and suppressing output unless -v is passed using verbosity:. The playbook must also use the fail module to enforce at least three precondition checks â one comparing a numeric threshold, one checking membership in a list, and one evaluating a boolean â and must print a clear success message only when all three checks pass.
+
+Acceptance Criteria:
+
+Running ansible-playbook playbooks/debug-and-fail.yml with variable values that violate each precondition individually causes the playbook to stop at that check and print a human-readable failure message identifying which condition failed and what the actual versus expected values were.
+Running the playbook with all preconditions satisfied produces output showing all four debug styles, the success message, and exits with code 0; running it again with -v produces at least one additional debug line that was suppressed in the previous run.
+Requirement 2: Design a playbook named custom-failure-conditions.yml that uses failed_when and changed_when to override Ansible's default success and change detection on at least three shell tasks. One task must parse numeric output from a shell command (such as disk usage percentage or a process count) and fail only when that number crosses a threshold you define. One task must be marked as not changed even when the underlying shell command modifies state. One task must use a multi-condition failed_when expression combining at least two independent checks with or.
+
+Acceptance Criteria:
+
+Each of the three tasks behaves correctly under both the passing and failing input conditions: the numeric threshold task fails exactly when the number exceeds your defined limit and passes otherwise; the changed_when: false task always reports ok in Ansible output regardless of what the shell command does; the multi-condition task fails when either condition is true and passes only when both are false.
+Running ansible-playbook playbooks/custom-failure-conditions.yml exits with code 0 when all conditions are within bounds, and exits with a non-zero code and a descriptive error when any condition is violated, with no unhandled Python tracebacks in the output.
+Task 3: Retry Logic and Production-Grade Error Handling
+Problem Statement
+Design and implement a production-style deployment playbook that combines retry mechanisms, block/rescue/always error handling, structured logging, and a final summary report. The playbook must be self-contained and runnable against localhost with no external infrastructure.
+
+Requirement 1: Design a playbook named resilient-deployment.yml that simulates a multi-stage deployment: precondition validation, dependency checks, application file deployment, and a health check. Each stage must be wrapped in a block/rescue/always structure. The rescue section of each block must log a structured failure record to a file under /tmp/deployment-logs/ containing the stage name, timestamp, and the value of ansible_failed_result.msg. The always section of each block must append a one-line status entry to a single shared log file at /tmp/deployment-logs/run.log. At least one stage must use retries, delay, and until to retry a shell task that simulates intermittent failure by checking whether a counter file has reached a target count (the task writes to the counter file on each attempt and succeeds only after three attempts). The final task in the playbook must read run.log and print its contents using the debug module.
+
+Acceptance Criteria:
+
+Running the playbook end-to-end produces a /tmp/deployment-logs/run.log file containing one status line per stage, and the retry-based task succeeds on its third attempt as shown by Ansible's FAILED - RETRYING output appearing exactly twice before the task reports ok.
+Manually editing the playbook to force one stage's block to fail (by setting a variable that triggers a fail task inside the block) causes that stage's rescue section to run and write a failure record to /tmp/deployment-logs/, while all subsequent stages and their always sections still execute and the playbook exits with code 0 because the failure was handled.
+Requirement 2: Design a playbook named error-report.yml that runs after resilient-deployment.yml and produces a human-readable deployment summary. The playbook must read all files in /tmp/deployment-logs/, use set_fact to build a summary dictionary containing the total number of log files, the content of run.log as a list of lines, and a pass/fail determination based on whether any file in the directory contains the word FAILED. The playbook must use the fail module to halt with a descriptive message if the pass/fail determination is negative, and must use the debug module with msg: to print the full summary dictionary in a readable format if the determination is positive.
+
+Acceptance Criteria:
+
+When /tmp/deployment-logs/ contains only success entries, ansible-playbook playbooks/error-report.yml exits with code 0 and prints the summary dictionary showing the correct file count and all log lines.
+When any file in /tmp/deployment-logs/ contains the string FAILED, the playbook exits with a non-zero code and a fail message that names the specific file containing the failure marker, with no unhandled exceptions in the output.
+Expected Outcomes
+You will have a working Ansible project that demonstrates debug output control, precondition enforcement, custom failure conditions, retry logic, and structured block-based error handling, all runnable against localhost with no external dependencies.
+Every playbook in the project exits predictably under both success and failure conditions, produces log artifacts that record what happened and when, and surfaces actionable error messages rather than raw Python tracebacks.
+Conclusion
+This lab required you to reason about failure modes before writing a single task, which is the core discipline of production Ansible work. The block/rescue/always pattern, combined with explicit fail and failed_when conditions, gives you deterministic control over how a playbook behaves when reality does not match expectations. Carry the habit of writing the failure path before the success path into every playbook you author going forward.
