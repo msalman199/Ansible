@@ -1,0 +1,31 @@
+---
+- name: System Information Gathering
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display system information
+      debug:
+        msg: |
+          Hostname: {{ ansible_hostname }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Architecture: {{ ansible_architecture }}
+          Memory: {{ ansible_memtotal_mb }} MB
+
+    - name: Create a test file
+      file:
+        path: /tmp/awx-test-{{ ansible_date_time.epoch }}
+        state: touch
+        mode: '0644'
+      register: file_created
+
+    - name: Show created file
+      debug:
+        msg: "Created file: {{ file_created.dest }}"
+
+    - name: Get current date
+      command: date
+      register: current_date
+
+    - name: Display current date
+      debug:
+        msg: "Current date and time: {{ current_date.stdout }}"
