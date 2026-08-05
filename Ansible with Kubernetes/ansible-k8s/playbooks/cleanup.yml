@@ -1,0 +1,68 @@
+---
+- name: Cleanup Kubernetes Resources
+  hosts: localhost
+  gather_facts: false
+  vars:
+    namespace: ansible-demo
+
+  tasks:
+    - name: Delete Deployment
+      kubernetes.core.k8s:
+        api_version: apps/v1
+        kind: Deployment
+        name: nginx-deployment
+        namespace: "{{ namespace }}"
+        state: absent
+        wait: true
+
+    - name: Delete Deployment Service
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Service
+        name: nginx-deployment-service
+        namespace: "{{ namespace }}"
+        state: absent
+
+    - name: Delete Pod
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        name: nginx-app-pod
+        namespace: "{{ namespace }}"
+        state: absent
+
+    - name: Delete Pod Service
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Service
+        name: nginx-app-service
+        namespace: "{{ namespace }}"
+        state: absent
+
+    - name: Delete ConfigMap
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: ConfigMap
+        name: nginx-app-config
+        namespace: "{{ namespace }}"
+        state: absent
+
+    - name: Delete Namespace
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace }}"
+        state: absent
+        wait: true
+
+    - name: Verify cleanup
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace }}"
+      register: namespace_check
+      failed_when: false
+
+    - name: Display cleanup result
+      debug:
+        msg: "Cleanup completed. Namespace {{ namespace }} {{ 'still exists' if namespace_check.resources else 'has been deleted' }}"
