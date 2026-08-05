@@ -1,0 +1,875 @@
+ Managing Kubernetes with Ansible
+Lab Objectives
+By the end of this lab, you will be able to:
+
+Install and configure Ansible on a Linux machine
+Set up a local Kubernetes cluster using Minikube
+Create Ansible playbooks to manage Kubernetes resources
+Automate the creation and management of Kubernetes deployments using Ansible
+Scale deployments and manage services through Ansible automation
+Understand the integration between Ansible and Kubernetes for infrastructure automation
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Linux command line operations
+Familiarity with YAML syntax
+Basic knowledge of containerization concepts
+Understanding of Kubernetes fundamentals (pods, deployments, services)
+Basic knowledge of Ansible concepts (playbooks, tasks, modules)
+Lab Environment
+Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your dedicated Linux machine. The provided Linux machine is bare metal with no pre-installed tools, so you will need to install all required tools during the lab following the instructions provided.
+
+Task 1: Environment Setup and Tool Installation
+Subtask 1.1: Update System and Install Dependencies
+First, update your system and install the necessary dependencies.
+
+# Update package lists
+sudo apt update && sudo apt upgrade -y
+
+# Install required packages
+sudo apt install -y curl wget apt-transport-https ca-certificates gnupg lsb-release python3 python3-pip git vim
+Subtask 1.2: Install Docker
+Install Docker which is required for running Kubernetes locally.
+
+# Add Docker's official GPG key
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+# Add Docker repository
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Update package lists and install Docker
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io
+
+# Add current user to docker group
+sudo usermod -aG docker $USER
+
+# Start and enable Docker service
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Verify Docker installation
+docker --version
+Note: You may need to log out and log back in for the group changes to take effect, or use newgrp docker to apply the group changes immediately.
+
+newgrp docker
+Subtask 1.3: Install kubectl
+Install kubectl, the Kubernetes command-line tool.
+
+# Download kubectl
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+# Make kubectl executable
+chmod +x kubectl
+
+# Move kubectl to PATH
+sudo mv kubectl /usr/local/bin/
+
+# Verify kubectl installation
+kubectl version --client
+Subtask 1.4: Install Minikube
+Install Minikube to run a local Kubernetes cluster.
+
+# Download Minikube
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+
+# Install Minikube
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+# Verify Minikube installation
+minikube version
+Subtask 1.5: Install Ansible
+Install Ansible and the Kubernetes collection.
+
+# Install Ansible using pip
+pip3 install ansible
+
+# Add pip3 bin directory to PATH
+echo 'export PATH=$PATH:~/.local/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify Ansible installation
+ansible --version
+
+# Install Kubernetes collection for Ansible
+ansible-galaxy collection install kubernetes.core
+
+# Install additional Python dependencies for Kubernetes
+pip3 install kubernetes pyyaml
+Task 2: Setting Up Local Kubernetes Cluster
+Subtask 2.1: Start Minikube Cluster
+Start a local Kubernetes cluster using Minikube.
+
+# Start Minikube with Docker driver
+minikube start --driver=docker
+
+# Verify cluster status
+minikube status
+
+# Check cluster information
+kubectl cluster-info
+
+# Verify nodes
+kubectl get nodes
+Subtask 2.2: Configure kubectl Context
+Ensure kubectl is configured to communicate with the Minikube cluster.
+
+# Get current context
+kubectl config current-context
+
+# View cluster configuration
+kubectl config view
+
+# Test connectivity
+kubectl get namespaces
+Task 3: Creating Ansible Configuration and Inventory
+Subtask 3.1: Create Project Directory Structure
+Create a structured directory for your Ansible project.
+
+# Create project directory
+mkdir -p ~/ansible-k8s-lab
+cd ~/ansible-k8s-lab
+
+# Create subdirectories
+mkdir -p playbooks roles inventory group_vars host_vars
+
+# Create files
+touch ansible.cfg inventory/hosts
+Subtask 3.2: Configure Ansible
+Create an Ansible configuration file.
+
+cat > ansible.cfg << 'EOF'
+[defaults]
+inventory = inventory/hosts
+host_key_checking = False
+stdout_callback = yaml
+gathering = explicit
+deprecation_warnings = False
+
+[inventory]
+enable_plugins = host_list, script, auto, yaml, ini, toml
+EOF
+Subtask 3.3: Create Inventory File
+Create an inventory file for localhost operations.
+
+cat > inventory/hosts << 'EOF'
+[local]
+localhost ansible_connection=local ansible_python_interpreter=/usr/bin/python3
+
+[k8s_cluster]
+localhost ansible_connection=local ansible_python_interpreter=/usr/bin/python3
+EOF
+Task 4: Creating Kubernetes Resources with Ansible
+Subtask 4.1: Create Namespace Management Playbook
+Create a playbook to manage Kubernetes namespaces.
+
+cat > playbooks/manage-namespace.yml << 'EOF'
+---
+- name: Manage Kubernetes Namespaces
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+  
+  tasks:
+    - name: Create namespace
+      kubernetes.core.k8s:
+        name: "{{ namespace_name }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+      register: namespace_result
+    
+    - name: Display namespace creation result
+      debug:
+        msg: "Namespace {{ namespace_name }} created successfully"
+      when: namespace_result.changed
+    
+    - name: Verify namespace exists
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace_name }}"
+      register: namespace_info
+    
+    - name: Display namespace information
+      debug:
+        var: namespace_info.resources[0].metadata.name
+EOF
+Subtask 4.2: Run Namespace Management Playbook
+Execute the namespace management playbook.
+
+# Run the playbook
+ansible-playbook playbooks/manage-namespace.yml
+
+# Verify namespace creation using kubectl
+kubectl get namespaces
+Subtask 4.3: Create Deployment Management Playbook
+Create a comprehensive playbook to manage Kubernetes deployments.
+
+cat > playbooks/manage-deployment.yml << 'EOF'
+---
+- name: Manage Kubernetes Deployments
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    app_image: "nginx:1.21"
+    replica_count: 3
+    app_port: 80
+  
+  tasks:
+    - name: Create deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+            labels:
+              app: "{{ app_name }}"
+          spec:
+            replicas: "{{ replica_count }}"
+            selector:
+              matchLabels:
+                app: "{{ app_name }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ app_name }}"
+              spec:
+                containers:
+                - name: "{{ app_name }}"
+                  image: "{{ app_image }}"
+                  ports:
+                  - containerPort: "{{ app_port }}"
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "50m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "100m"
+      register: deployment_result
+    
+    - name: Display deployment creation result
+      debug:
+        msg: "Deployment {{ app_name }} created/updated successfully"
+    
+    - name: Wait for deployment to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: deployment_status
+    
+    - name: Display deployment status
+      debug:
+        msg: "Deployment is ready with {{ deployment_status.resources[0].status.readyReplicas }} ready replicas"
+EOF
+Subtask 4.4: Run Deployment Management Playbook
+Execute the deployment management playbook.
+
+# Run the deployment playbook
+ansible-playbook playbooks/manage-deployment.yml
+
+# Verify deployment using kubectl
+kubectl get deployments -n ansible-demo
+kubectl get pods -n ansible-demo
+Task 5: Managing Services with Ansible
+Subtask 5.1: Create Service Management Playbook
+Create a playbook to manage Kubernetes services.
+
+cat > playbooks/manage-service.yml << 'EOF'
+---
+- name: Manage Kubernetes Services
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    service_name: "nginx-service"
+    service_port: 80
+    target_port: 80
+    service_type: "ClusterIP"
+  
+  tasks:
+    - name: Create service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ namespace_name }}"
+            labels:
+              app: "{{ app_name }}"
+          spec:
+            type: "{{ service_type }}"
+            ports:
+            - port: "{{ service_port }}"
+              targetPort: "{{ target_port }}"
+              protocol: TCP
+            selector:
+              app: "{{ app_name }}"
+      register: service_result
+    
+    - name: Display service creation result
+      debug:
+        msg: "Service {{ service_name }} created/updated successfully"
+    
+    - name: Get service information
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: "{{ service_name }}"
+        namespace: "{{ namespace_name }}"
+      register: service_info
+    
+    - name: Display service details
+      debug:
+        msg: 
+          - "Service Name: {{ service_info.resources[0].metadata.name }}"
+          - "Service Type: {{ service_info.resources[0].spec.type }}"
+          - "Cluster IP: {{ service_info.resources[0].spec.clusterIP }}"
+          - "Port: {{ service_info.resources[0].spec.ports[0].port }}"
+EOF
+Subtask 5.2: Run Service Management Playbook
+Execute the service management playbook.
+
+# Run the service playbook
+ansible-playbook playbooks/manage-service.yml
+
+# Verify service using kubectl
+kubectl get services -n ansible-demo
+kubectl describe service nginx-service -n ansible-demo
+Task 6: Scaling Deployments with Ansible
+Subtask 6.1: Create Scaling Playbook
+Create a playbook specifically for scaling deployments.
+
+cat > playbooks/scale-deployment.yml << 'EOF'
+---
+- name: Scale Kubernetes Deployments
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    new_replica_count: 5
+  
+  tasks:
+    - name: Get current deployment status
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+      register: current_deployment
+    
+    - name: Display current replica count
+      debug:
+        msg: "Current replica count: {{ current_deployment.resources[0].spec.replicas }}"
+    
+    - name: Scale deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+          spec:
+            replicas: "{{ new_replica_count }}"
+      register: scale_result
+    
+    - name: Wait for scaling to complete
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: scaled_deployment
+    
+    - name: Display scaling result
+      debug:
+        msg: "Deployment scaled to {{ scaled_deployment.resources[0].status.readyReplicas }} replicas"
+    
+    - name: List all pods
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ namespace_name }}"
+        label_selectors:
+          - app={{ app_name }}
+      register: pod_list
+    
+    - name: Display pod information
+      debug:
+        msg: "Pod {{ item.metadata.name }} is in {{ item.status.phase }} state"
+      loop: "{{ pod_list.resources }}"
+EOF
+Subtask 6.2: Run Scaling Playbook
+Execute the scaling playbook and observe the results.
+
+# Run the scaling playbook
+ansible-playbook playbooks/scale-deployment.yml
+
+# Verify scaling using kubectl
+kubectl get pods -n ansible-demo
+kubectl get deployment nginx-app -n ansible-demo
+Subtask 6.3: Scale Down Deployment
+Create and run a playbook to scale down the deployment.
+
+cat > playbooks/scale-down.yml << 'EOF'
+---
+- name: Scale Down Kubernetes Deployment
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    new_replica_count: 2
+  
+  tasks:
+    - name: Scale down deployment
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+          spec:
+            replicas: "{{ new_replica_count }}"
+    
+    - name: Wait for scale down to complete
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: scaled_down_deployment
+    
+    - name: Display scale down result
+      debug:
+        msg: "Deployment scaled down to {{ scaled_down_deployment.resources[0].status.readyReplicas }} replicas"
+EOF
+
+# Run the scale down playbook
+ansible-playbook playbooks/scale-down.yml
+
+# Verify the scaling
+kubectl get pods -n ansible-demo
+Task 7: Advanced Ansible Kubernetes Management
+Subtask 7.1: Create Comprehensive Management Playbook
+Create a comprehensive playbook that manages the entire application lifecycle.
+
+cat > playbooks/full-app-lifecycle.yml << 'EOF'
+---
+- name: Complete Application Lifecycle Management
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    service_name: "nginx-service"
+    app_image: "nginx:1.21"
+    replica_count: 3
+    action: "deploy"  # Options: deploy, scale, update, delete
+    new_replica_count: 4
+    new_image: "nginx:1.22"
+  
+  tasks:
+    - name: Create namespace if it doesn't exist
+      kubernetes.core.k8s:
+        name: "{{ namespace_name }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+      when: action in ['deploy', 'scale', 'update']
+    
+    - name: Deploy application
+      block:
+        - name: Create deployment
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: "{{ app_name }}"
+                namespace: "{{ namespace_name }}"
+                labels:
+                  app: "{{ app_name }}"
+              spec:
+                replicas: "{{ replica_count }}"
+                selector:
+                  matchLabels:
+                    app: "{{ app_name }}"
+                template:
+                  metadata:
+                    labels:
+                      app: "{{ app_name }}"
+                  spec:
+                    containers:
+                    - name: "{{ app_name }}"
+                      image: "{{ app_image }}"
+                      ports:
+                      - containerPort: 80
+        
+        - name: Create service
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: "{{ service_name }}"
+                namespace: "{{ namespace_name }}"
+              spec:
+                type: ClusterIP
+                ports:
+                - port: 80
+                  targetPort: 80
+                selector:
+                  app: "{{ app_name }}"
+      when: action == 'deploy'
+    
+    - name: Scale application
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+          spec:
+            replicas: "{{ new_replica_count }}"
+      when: action == 'scale'
+    
+    - name: Update application image
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+          spec:
+            template:
+              spec:
+                containers:
+                - name: "{{ app_name }}"
+                  image: "{{ new_image }}"
+                  ports:
+                  - containerPort: 80
+      when: action == 'update'
+    
+    - name: Delete application
+      block:
+        - name: Delete deployment
+          kubernetes.core.k8s:
+            state: absent
+            api_version: apps/v1
+            kind: Deployment
+            name: "{{ app_name }}"
+            namespace: "{{ namespace_name }}"
+        
+        - name: Delete service
+          kubernetes.core.k8s:
+            state: absent
+            api_version: v1
+            kind: Service
+            name: "{{ service_name }}"
+            namespace: "{{ namespace_name }}"
+      when: action == 'delete'
+    
+    - name: Get application status
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace_name }}"
+      register: app_status
+      when: action != 'delete'
+    
+    - name: Display application status
+      debug:
+        msg: "Application {{ app_name }} has {{ app_status.resources[0].status.readyReplicas | default(0) }} ready replicas"
+      when: action != 'delete' and app_status.resources | length > 0
+EOF
+Subtask 7.2: Test Different Lifecycle Actions
+Test the comprehensive playbook with different actions.
+
+# Test scaling action
+ansible-playbook playbooks/full-app-lifecycle.yml -e "action=scale new_replica_count=6"
+
+# Verify scaling
+kubectl get pods -n ansible-demo
+
+# Test image update
+ansible-playbook playbooks/full-app-lifecycle.yml -e "action=update new_image=nginx:1.22"
+
+# Check rollout status
+kubectl rollout status deployment/nginx-app -n ansible-demo
+
+# Verify image update
+kubectl describe deployment nginx-app -n ansible-demo | grep Image
+Task 8: Monitoring and Verification
+Subtask 8.1: Create Monitoring Playbook
+Create a playbook to monitor and verify Kubernetes resources.
+
+cat > playbooks/monitor-resources.yml << 'EOF'
+---
+- name: Monitor Kubernetes Resources
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+  
+  tasks:
+    - name: Get all deployments in namespace
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ namespace_name }}"
+      register: deployments
+    
+    - name: Display deployment information
+      debug:
+        msg:
+          - "Deployment: {{ item.metadata.name }}"
+          - "Replicas: {{ item.spec.replicas }}"
+          - "Ready Replicas: {{ item.status.readyReplicas | default(0) }}"
+          - "Available Replicas: {{ item.status.availableReplicas | default(0) }}"
+      loop: "{{ deployments.resources }}"
+    
+    - name: Get all services in namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        namespace: "{{ namespace_name }}"
+      register: services
+    
+    - name: Display service information
+      debug:
+        msg:
+          - "Service: {{ item.metadata.name }}"
+          - "Type: {{ item.spec.type }}"
+          - "Cluster IP: {{ item.spec.clusterIP }}"
+          - "Ports: {{ item.spec.ports }}"
+      loop: "{{ services.resources }}"
+    
+    - name: Get all pods in namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ namespace_name }}"
+      register: pods
+    
+    - name: Display pod information
+      debug:
+        msg:
+          - "Pod: {{ item.metadata.name }}"
+          - "Status: {{ item.status.phase }}"
+          - "Node: {{ item.spec.nodeName | default('Not scheduled') }}"
+          - "Ready: {{ item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first | default('Unknown') }}"
+      loop: "{{ pods.resources }}"
+    
+    - name: Check resource usage
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+      register: nodes
+    
+    - name: Display node information
+      debug:
+        msg:
+          - "Node: {{ item.metadata.name }}"
+          - "Status: {{ item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first }}"
+          - "Kubelet Version: {{ item.status.nodeInfo.kubeletVersion }}"
+      loop: "{{ nodes.resources }}"
+EOF
+Subtask 8.2: Run Monitoring Playbook
+Execute the monitoring playbook to get comprehensive resource information.
+
+# Run the monitoring playbook
+ansible-playbook playbooks/monitor-resources.yml
+
+# Also verify using kubectl commands
+kubectl get all -n ansible-demo
+kubectl top nodes
+kubectl top pods -n ansible-demo
+Task 9: Cleanup and Resource Management
+Subtask 9.1: Create Cleanup Playbook
+Create a playbook to clean up all resources.
+
+cat > playbooks/cleanup.yml << 'EOF'
+---
+- name: Cleanup Kubernetes Resources
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+  
+  tasks:
+    - name: Get all resources in namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace_name }}"
+      register: namespace_check
+      ignore_errors: yes
+    
+    - name: Delete all deployments in namespace
+      kubernetes.core.k8s:
+        state: absent
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ namespace_name }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ deployments.resources | default([]) }}"
+      vars:
+        deployments: "{{ lookup('kubernetes.core.k8s', api_version='apps/v1', kind='Deployment', namespace=namespace_name) }}"
+      when: namespace_check.resources | length > 0
+    
+    - name: Delete all services in namespace
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Service
+        namespace: "{{ namespace_name }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ services.resources | default([]) }}"
+      vars:
+        services: "{{ lookup('kubernetes.core.k8s', api_version='v1', kind='Service', namespace=namespace_name) }}"
+      when: namespace_check.resources | length > 0
+    
+    - name: Wait for resources to be deleted
+      pause:
+        seconds: 10
+      when: namespace_check.resources | length > 0
+    
+    - name: Delete namespace
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace_name }}"
+      when: namespace_check.resources | length > 0
+    
+    - name: Verify cleanup
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ namespace_name }}"
+      register: cleanup_check
+      ignore_errors: yes
+    
+    - name: Display cleanup result
+      debug:
+        msg: "Namespace {{ namespace_name }} has been successfully deleted"
+      when: cleanup_check.resources | length == 0
+EOF
+Subtask 9.2: Run Cleanup Playbook
+Execute the cleanup playbook to remove all created resources.
+
+# Run the cleanup playbook
+ansible-playbook playbooks/cleanup.yml
+
+# Verify cleanup
+kubectl get namespaces
+kubectl get all -n ansible-demo
+Troubleshooting Tips
+Common Issues and Solutions
+Issue 1: Ansible kubernetes.core collection not found
+
+# Solution: Reinstall the collection
+ansible-galaxy collection install kubernetes.core --force
+Issue 2: Permission denied when accessing Docker
+
+# Solution: Add user to docker group and restart session
+sudo usermod -aG docker $USER
+newgrp docker
+Issue 3: Minikube fails to start
+
+# Solution: Check Docker status and restart if needed
+sudo systemctl status docker
+sudo systemctl restart docker
+minikube delete
+minikube start --driver=docker
+Issue 4: kubectl connection refused
+
+# Solution: Ensure Minikube is running and context is set
+minikube status
+kubectl config current-context
+minikube update-context
+Issue 5: Python dependencies missing
+
+# Solution: Install required Python packages
+pip3 install kubernetes pyyaml requests
+Verification Commands
+Use these commands to verify your lab completion:
+
+# Check Ansible installation
+ansible --version
+ansible-galaxy collection list | grep kubernetes
+
+# Check Kubernetes cluster
+kubectl cluster-info
+kubectl get nodes
+
+# Check created resources
+kubectl get namespaces
+kubectl get all -n ansible-demo
+
+# List all playbooks created
+ls -la playbooks/
+
+# Test a simple Ansible command
+ansible localhost -m ping
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Set up a complete development environment with Ansible, Kubernetes (Minikube), and all necessary tools on a single Linux machine
+Created and managed Kubernetes namespaces using Ansible automation, demonstrating infrastructure as code principles
+Automated Kubernetes deployment creation and management through Ansible playbooks, eliminating manual deployment processes
+Implemented service management automation to expose applications and manage network connectivity
+Mastered deployment scaling techniques using Ansible, enabling dynamic resource allocation based on demand
+Developed comprehensive lifecycle management playbooks that handle deployment, scaling, updating, and deletion operations
+Created monitoring and verification systems to track resource status and health
+Implemented proper cleanup procedures to maintain a clean environment
+This lab demonstrates the powerful combination of Ansible and Kubernetes for modern infrastructure automation. By using Ansible to manage Kubernetes resources, you can:
+
+Ensure consistency across different environments
+Reduce human error through automation
+Enable version control of infrastructure changes
+Facilitate collaboration through code-based infrastructure management
+Scale operations efficiently as your infrastructure grows
+The skills you've developed in this lab are directly applicable to real-world scenarios where organizations need to manage containerized applications at scale. Understanding how to automate Kubernetes operations with Ansible is essential for modern DevOps practices and cloud-native application management.
+
+These automation techniques form the foundation for more advanced topics such as CI/CD pipelines, GitOps workflows, and enterprise-scale container orchestration, making this knowledge invaluable for your continued growth in cloud and container technologies.
