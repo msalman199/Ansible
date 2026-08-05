@@ -1,0 +1,69 @@
+---
+- name: Monitor Kubernetes Resources
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+  
+  tasks:
+    - name: Get all deployments in namespace
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ namespace_name }}"
+      register: deployments
+    
+    - name: Display deployment information
+      debug:
+        msg:
+          - "Deployment: {{ item.metadata.name }}"
+          - "Replicas: {{ item.spec.replicas }}"
+          - "Ready Replicas: {{ item.status.readyReplicas | default(0) }}"
+          - "Available Replicas: {{ item.status.availableReplicas | default(0) }}"
+      loop: "{{ deployments.resources }}"
+    
+    - name: Get all services in namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        namespace: "{{ namespace_name }}"
+      register: services
+    
+    - name: Display service information
+      debug:
+        msg:
+          - "Service: {{ item.metadata.name }}"
+          - "Type: {{ item.spec.type }}"
+          - "Cluster IP: {{ item.spec.clusterIP }}"
+          - "Ports: {{ item.spec.ports }}"
+      loop: "{{ services.resources }}"
+    
+    - name: Get all pods in namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ namespace_name }}"
+      register: pods
+    
+    - name: Display pod information
+      debug:
+        msg:
+          - "Pod: {{ item.metadata.name }}"
+          - "Status: {{ item.status.phase }}"
+          - "Node: {{ item.spec.nodeName | default('Not scheduled') }}"
+          - "Ready: {{ item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first | default('Unknown') }}"
+      loop: "{{ pods.resources }}"
+    
+    - name: Check resource usage
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+      register: nodes
+    
+    - name: Display node information
+      debug:
+        msg:
+          - "Node: {{ item.metadata.name }}"
+          - "Status: {{ item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first }}"
+          - "Kubelet Version: {{ item.status.nodeInfo.kubeletVersion }}"
+      loop: "{{ nodes.resources }}"
