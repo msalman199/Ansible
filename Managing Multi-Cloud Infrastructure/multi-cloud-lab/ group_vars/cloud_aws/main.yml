@@ -1,0 +1,6 @@
+---
+cloud_provider: aws
+package_manager: "{{ 'yum' if ansible_os_family == 'RedHat' else 'apt' }}"
+web_server: nginx
+monitoring_agent: cloudwatch
+backup_schedule: "0 2 * * *"
