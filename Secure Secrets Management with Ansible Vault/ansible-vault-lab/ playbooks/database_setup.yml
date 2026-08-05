@@ -1,0 +1,34 @@
+---
+- name: Database Configuration Playbook
+  hosts: local
+  vars_files:
+    - ../vault_files/database_secrets.yml
+  tasks:
+    - name: Display database connection info (masked)
+      debug:
+        msg: "Connecting to database {{ db_name }} on {{ db_host }}:{{ db_port }}"
+    
+    - name: Create database configuration file
+      copy:
+        content: |
+          [database]
+          host={{ db_host }}
+          port={{ db_port }}
+          database={{ db_name }}
+          username={{ db_username }}
+          # Password is encrypted and secure
+        dest: /tmp/db_config.ini
+        mode: '0600'
+    
+    - name: Verify configuration file was created
+      stat:
+        path: /tmp/db_config.ini
+      register: config_file
+    
+    - name: Show configuration file status
+      debug:
+        msg: "Configuration file exists: {{ config_file.stat.exists }}"
+    
+    - name: Display API key length (for security)
+      debug:
+        msg: "API key length: {{ api_key | length }} characters"
