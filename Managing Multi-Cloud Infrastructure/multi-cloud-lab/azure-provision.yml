@@ -1,0 +1,115 @@
+---
+- name: Provision Azure Virtual Machine
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../credentials/azure_credentials.yml
+  vars:
+    resource_group: ansible-rg
+    location: eastus
+    vm_name: ansible-azure-vm
+    vm_size: Standard_B1s
+    admin_username: azureuser
+    
+  tasks:
+    - name: Create resource group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ resource_group }}"
+        location: "{{ location }}"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Create virtual network
+      azure.azcollection.azure_rm_virtualnetwork:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-vnet"
+        address_prefixes: "10.0.0.0/16"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Create subnet
+      azure.azcollection.azure_rm_subnet:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-subnet"
+        address_prefix: "10.0.1.0/24"
+        virtual_network: "{{ vm_name }}-vnet"
+
+    - name: Create public IP
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ resource_group }}"
+        allocation_method: Static
+        name: "{{ vm_name }}-public-ip"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+      register: public_ip
+
+    - name: Create Network Security Group
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-nsg"
+        rules:
+          - name: SSH
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 1001
+            direction: Inbound
+          - name: HTTP
+            protocol: Tcp
+            destination_port_range: 80
+            access: Allow
+            priority: 1002
+            direction: Inbound
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Create network interface
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}-nic"
+        virtual_network: "{{ vm_name }}-vnet"
+        subnet: "{{ vm_name }}-subnet"
+        public_ip_name: "{{ vm_name }}-public-ip"
+        security_group: "{{ vm_name }}-nsg"
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+
+    - name: Generate SSH key pair
+      openssh_keypair:
+        path: "~/multi-cloud-lab/credentials/azure-key"
+        size: 2048
+      register: ssh_key
+
+    - name: Create virtual machine
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}"
+        vm_size: "{{ vm_size }}"
+        admin_username: "{{ admin_username }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ admin_username }}/.ssh/authorized_keys"
+            key_data: "{{ ssh_key.public_key }}"
+        network_interfaces: "{{ vm_name }}-nic"
+        image:
+          offer: 0001-com-ubuntu-server-focal
+          publisher: Canonical
+          sku: 20_04-lts-gen2
+          version: latest
+        tags:
+          Environment: lab
+          ManagedBy: ansible
+          Cloud: azure
+      register: azure_vm
+
+    - name: Display Azure VM information
+      debug:
+        msg:
+          - "VM Name: {{ azure_vm.ansible_facts.azure_vm.name }}"
+          - "Public IP: {{ public_ip.state.ip_address }}"
+          - "Resource Group: {{ resource_group }}"
