@@ -1,0 +1,55 @@
+---
+- name: Vault Troubleshooting and Diagnostics
+  hosts: local
+  vars_files:
+    - ../vault_files/database_secrets.yml
+  tasks:
+    - name: Test 1 - Verify vault variables are accessible
+      debug:
+        msg: "Vault variables loaded successfully"
+      when: db_username is defined and db_password is defined
+    
+    - name: Test 2 - Check variable types
+      debug:
+        msg: 
+          - "db_username type: {{ db_username | type_debug }}"
+          - "db_password type: {{ db_password | type_debug }}"
+          - "db_port type: {{ db_port | type_debug }}"
+    
+    - name: Test 3 - Validate non-empty values
+      assert:
+        that:
+          - db_username | length > 0
+          - db_password | length > 0
+          - db_host | length > 0
+        fail_msg: "One or more vault variables are empty"
+        success_msg: "All vault variables have values"
+    
+    - name: Test 4 - Create test connection string
+      set_fact:
+        connection_string: "postgresql://{{ db_username }}:***@{{ db_host }}:{{ db_port }}/{{ db_name }}"
+    
+    - name: Test 5 - Display masked connection info
+      debug:
+        msg: "Connection string format: {{ connection_string }}"
+    
+    - name: Test 6 - Write diagnostic info
+      copy:
+        content: |
+          Vault Diagnostic Report
+          Generated: {{ ansible_date_time.iso8601 }}
+          
+          Variables Status:
+          - db_username: {{ 'OK' if db_username is defined else 'MISSING' }}
+          - db_password: {{ 'OK' if db_password is defined else 'MISSING' }}
+          - db_host: {{ 'OK' if db_host is defined else 'MISSING' }}
+          - db_port: {{ 'OK' if db_port is defined else 'MISSING' }}
+          - db_name: {{ 'OK' if db_name is defined else 'MISSING' }}
+          - api_key: {{ 'OK' if api_key is defined else 'MISSING' }}
+          
+          Security Check:
+          - Password length: {{ db_password | length }} characters
+          - API key length: {{ api_key | length }} characters
+          
+        dest: /tmp/vault_diagnostic.txt
+        mode: '0600'
