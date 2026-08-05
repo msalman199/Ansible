@@ -1,0 +1,19 @@
+---
+- name: Configure UFW firewall
+  ufw:
+    rule: "{{ item.rule }}"
+    port: "{{ item.port | default(omit) }}"
+    proto: "{{ item.proto | default(omit) }}"
+    direction: "{{ item.direction | default(omit) }}"
+    policy: "{{ item.policy | default(omit) }}"
+  loop:
+    - { direction: 'incoming', policy: 'deny' }
+    - { direction: 'outgoing', policy: 'allow' }
+    - { rule: 'allow', port: '22', proto: 'tcp' }
+    - { rule: 'allow', port: '80', proto: 'tcp' }
+    - { rule: 'allow', port: '443', proto: 'tcp' }
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+    logging: 'on'
