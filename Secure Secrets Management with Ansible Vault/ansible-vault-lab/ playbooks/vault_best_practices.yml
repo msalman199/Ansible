@@ -1,0 +1,60 @@
+---
+- name: Ansible Vault Best Practices Demo
+  hosts: local
+  vars_files:
+    - ../vault_files/database_secrets.yml
+  vars:
+    # Non-sensitive configuration
+    log_level: "INFO"
+    max_connections: 100
+    timeout_seconds: 30
+  tasks:
+    - name: Best Practice 1 - Never log sensitive data
+      debug:
+        msg: "Database configured for {{ db_name }} (password hidden)"
+      # NEVER do: debug: var=db_password
+    
+    - name: Best Practice 2 - Use no_log for sensitive tasks
+      shell: echo "Connecting with password {{ db_password }}"
+      register: connection_result
+      no_log: true
+      changed_when: false
+    
+    - name: Best Practice 3 - Validate vault variables exist
+      assert:
+        that:
+          - db_username is defined
+          - db_password is defined
+          - db_host is defined
+          - api_key is defined
+        fail_msg: "Required vault variables are missing"
+        success_msg: "All required vault variables are present"
+    
+    - name: Best Practice 4 - Use secure file permissions
+      copy:
+        content: |
+          # Secure configuration - restricted access
+          DB_USER={{ db_username }}
+          DB_HOST={{ db_host }}
+          # Password managed securely
+        dest: /tmp/secure_config.conf
+        mode: '0600'  # Owner read/write only
+        owner: "{{ ansible_user_id }}"
+    
+    - name: Best Practice 5 - Verify secure permissions
+      stat:
+        path: /tmp/secure_config.conf
+      register: secure_file
+    
+    - name: Show file security status
+      debug:
+        msg: 
+          - "File mode: {{ secure_file.stat.mode }}"
+          - "Owner: {{ secure_file.stat.pw_name }}"
+          - "Readable by others: {{ secure_file.stat.readable }}"
+    
+    - name: Best Practice 6 - Clean up sensitive data
+      file:
+        path: /tmp/secure_config.conf
+        state: absent
+      when: cleanup_enabled | default(true)
