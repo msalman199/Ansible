@@ -1,0 +1,84 @@
+---
+- name: Deploy Application using Deployment
+  hosts: localhost
+  gather_facts: false
+  vars:
+    namespace: ansible-demo
+    app_name: nginx-deployment
+    image: nginx:latest
+    replicas: 3
+
+  tasks:
+    - name: Create Deployment
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ app_name }}"
+            namespace: "{{ namespace }}"
+            labels:
+              app: "{{ app_name }}"
+          spec:
+            replicas: "{{ replicas }}"
+            selector:
+              matchLabels:
+                app: "{{ app_name }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ app_name }}"
+              spec:
+                containers:
+                - name: nginx
+                  image: "{{ image }}"
+                  ports:
+                  - containerPort: 80
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "50m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "100m"
+        state: present
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: deployment_result
+
+    - name: Create LoadBalancer Service
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ app_name }}-service"
+            namespace: "{{ namespace }}"
+          spec:
+            selector:
+              app: "{{ app_name }}"
+            ports:
+            - protocol: TCP
+              port: 80
+              targetPort: 80
+            type: NodePort
+        state: present
+
+    - name: Get deployment status
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace }}"
+      register: deployment_info
+
+    - name: Display deployment information
+      debug:
+        msg:
+          - "Deployment: {{ deployment_info.resources[0].metadata.name }}"
+          - "Replicas: {{ deployment_info.resources[0].status.replicas }}"
+          - "Ready Replicas: {{ deployment_info.resources[0].status.readyReplicas }}"
+          - "Available Replicas: {{ deployment_info.resources[0].status.availableReplicas }}"
