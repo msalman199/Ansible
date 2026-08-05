@@ -1,0 +1,6 @@
+[webservers]
+localhost ansible_connection=local
+
+[webservers:vars]
+ansible_user=jenkins
+ansible_become=yes
