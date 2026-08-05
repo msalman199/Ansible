@@ -1,0 +1,34 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <actions/>
+  <description>Deploy web application using Ansible</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>#!/bin/bash
+cd /var/lib/jenkins/deployment-project
+
+# Set environment variables
+export BUILD_NUMBER=${BUILD_NUMBER}
+export ANSIBLE_HOST_KEY_CHECKING=False
+
+# Run Ansible playbook
+ansible-playbook -i inventory/hosts playbooks/deploy-webapp.yml -v
+
+# Verify deployment
+sleep 5
+curl -s http://localhost | grep -q "Application Deployed Successfully" && echo "Deployment verification: SUCCESS" || echo "Deployment verification: FAILED"
+      </command>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>
