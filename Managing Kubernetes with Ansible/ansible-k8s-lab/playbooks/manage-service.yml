@@ -1,0 +1,53 @@
+---
+- name: Manage Kubernetes Services
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace_name: "ansible-demo"
+    app_name: "nginx-app"
+    service_name: "nginx-service"
+    service_port: 80
+    target_port: 80
+    service_type: "ClusterIP"
+  
+  tasks:
+    - name: Create service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ namespace_name }}"
+            labels:
+              app: "{{ app_name }}"
+          spec:
+            type: "{{ service_type }}"
+            ports:
+            - port: "{{ service_port }}"
+              targetPort: "{{ target_port }}"
+              protocol: TCP
+            selector:
+              app: "{{ app_name }}"
+      register: service_result
+    
+    - name: Display service creation result
+      debug:
+        msg: "Service {{ service_name }} created/updated successfully"
+    
+    - name: Get service information
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: "{{ service_name }}"
+        namespace: "{{ namespace_name }}"
+      register: service_info
+    
+    - name: Display service details
+      debug:
+        msg: 
+          - "Service Name: {{ service_info.resources[0].metadata.name }}"
+          - "Service Type: {{ service_info.resources[0].spec.type }}"
+          - "Cluster IP: {{ service_info.resources[0].spec.clusterIP }}"
+          - "Port: {{ service_info.resources[0].spec.ports[0].port }}"
