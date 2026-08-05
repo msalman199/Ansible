@@ -1,0 +1,86 @@
+Working with Ansible Modules
+Objectives
+Design and implement cross-distribution package management automation using Ansible's apt and yum modules with conditional logic
+Build a Docker container deployment and lifecycle management system driven entirely by Ansible playbooks
+Validate a multi-service infrastructure deployment using Ansible's testing and assertion modules
+Prerequisites
+Comfort with Ubuntu command-line operations including file editing, service management, and process inspection
+Familiarity with YAML syntax, package managers (apt/yum), and basic containerization concepts
+Lab Environment
+You will work on a dedicated AWS EC2 Ubuntu instance provided by Al Nafi. The instance has a base Ubuntu installation; you will install all required tools in Task 1.
+
+Task 1: Environment Setup and Tool Verification
+Requirement 1
+Design and implement a repeatable bootstrap procedure that installs Ansible (via pip3), Docker Engine, and the Python Docker SDK on the bare Ubuntu instance, then verifies each tool is operational before any automation work begins.
+
+Your procedure must produce unambiguous confirmation output for each tool: Ansible version string, Docker server version string, and a successful docker run hello-world execution â all without requiring a shell restart mid-procedure.
+
+Confirmation: Running ansible --version, docker version, and python3 -c "import docker; print(docker.__version__)" each return a version string with exit code 0.
+
+Troubleshoot this step â Ansible install via pip3:
+
+Error seen: WARNING: The script ansible is installed in '/home/ubuntu/.local/bin' which is not on PATH followed by ansible: command not found.
+Recovery: Run export PATH="$HOME/.local/bin:$PATH" and append that line to ~/.bashrc with echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc.
+Official reference: https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+Troubleshoot this step â Docker Engine install:
+
+Error seen: E: Package 'docker-ce' has no installation candidate after adding the repository.
+Recovery: Verify the repository file is correct with cat /etc/apt/sources.list.d/docker.list â it must be a single unbroken line; then run sudo apt-get update again before retrying the install.
+Official reference: https://docs.docker.com/engine/install/ubuntu/
+Troubleshoot this step â Python Docker SDK:
+
+Error seen: ModuleNotFoundError: No module named 'docker' when Ansible runs a docker_container task.
+Recovery: Confirm the SDK is installed for the same Python interpreter Ansible uses by running ansible -m debug -a "msg={{ ansible_python_interpreter }}" localhost and then installing with that interpreter explicitly: <interpreter> -m pip install docker.
+Official reference: https://docker-py.readthedocs.io/en/stable/
+Requirement 2
+Design and implement an Ansible project directory layout that includes a working ansible.cfg pointing to a local inventory, an inventory file that targets localhost via local connection, and a smoke-test playbook that gathers facts and prints the OS family, total RAM in MB, and number of CPU cores.
+
+Confirmation: Running ansible-playbook smoke-test.yml completes with zero failures and prints the three fact values in the debug output.
+
+Task 2: Cross-Distribution Package Management and Docker Container Deployment
+Requirement 1
+Design and implement a single Ansible playbook that manages packages across both Debian-based and Red Hat-based hosts without duplicating task logic. The playbook must use host facts to branch conditionally (Ansible's when directive), install a defined list of common utilities, install distribution-specific packages from separate variable lists, register the result of each installation block, and print a structured summary showing which blocks changed state and which were already satisfied.
+
+Your solution must satisfy all of the following constraints:
+
+The playbook must not fail on a Debian host simply because yum tasks are present, and must not fail on a Red Hat host because apt tasks are present â conditional guards must be correct.
+Package installation must be idempotent: running the playbook twice in succession must produce zero changed tasks on the second run.
+The summary output must include the name of each package group and a changed: true/false value derived from registered results, not hardcoded strings.
+Confirmation: First run shows at least one changed block; second run shows changed=0 in the play recap; the debug summary lists every package group with its correct changed state.
+
+Requirement 2
+Design and implement a playbook that deploys three Docker containers â an Nginx web server, a Redis instance, and a MySQL 8.0 instance â each with named volumes mapped to host directories under /opt/lab/, environment variables supplied from a vars block, and a restart_policy of unless-stopped. The playbook must also verify each container reaches a running state by querying container info and asserting State.Status == "running" using Ansible's assert module (a module that halts the play with a custom failure message if a condition is false) before the play ends.
+
+Your solution must satisfy all of the following constraints:
+
+All three containers must be defined in a single vars list and deployed with one loop â no copy-pasted docker_container tasks.
+Volume host directories must be created by the playbook before containers start; the playbook must not rely on Docker to create them.
+The assert tasks must emit a human-readable failure message that names the specific container that failed, not a generic error.
+Confirmation: docker ps shows all three containers with status Up; running the playbook a second time produces changed=0 for all container tasks; deliberately stopping one container and re-running the playbook brings it back to running state automatically.
+
+Task 3: Infrastructure Validation and Automated Reporting
+Requirement 1
+Design and implement a validation playbook that tests the complete state of the environment built in Task 2 and produces a machine-readable JSON report file at /tmp/lab-report.json. The playbook must run at least seven distinct checks covering: package presence (using command or shell to call the binary with --version), container running state, host directory existence, Nginx HTTP response on port 8080, Redis PING response via docker exec, MySQL query execution via docker exec, and cron or systemd timer presence for at least one scheduled task you define. Each check result must be stored as a dict with keys name, passed (boolean), and detail (string), collected into a list, and written to the report file using the copy module with content rendered from the list.
+
+Your solution must satisfy all of the following constraints:
+
+Every check must use ignore_errors: yes or failed_when: false so a single failing service does not abort the remaining checks.
+The final task must use assert to fail the play if fewer than five of the seven checks passed, printing the count of failures.
+The JSON file must be valid JSON parseable by python3 -m json.tool /tmp/lab-report.json with exit code 0.
+Confirmation: python3 -m json.tool /tmp/lab-report.json prints formatted JSON with seven entries; deliberately breaking one container and re-running the playbook produces a report with that container's passed field set to false while all other entries remain accurate.
+
+Requirement 2
+Design and implement a cleanup playbook that removes all containers, deletes all host volume directories under /opt/lab/, removes the application user and its home directory if you created one, and restores the system to a state where the validation playbook reports zero passing checks. The cleanup playbook must be fully idempotent â running it on an already-clean system must produce zero failures and zero errors.
+
+Your solution must satisfy all of the following constraints:
+
+Container removal must use force_kill: yes to handle containers that are unresponsive.
+Every removal task must include ignore_errors: yes so the playbook completes fully even if a resource was already absent.
+After cleanup, running docker ps -a must show none of the three lab containers, and ls /opt/lab must return a non-zero exit code.
+Confirmation: Running the cleanup playbook twice in succession produces failed=0 unreachable=0 both times; the validation playbook run immediately after cleanup reports fewer than five checks passing and triggers the assert failure.
+
+Expected Outcomes
+A fully automated Ansible project that installs packages, deploys three Docker containers, validates the deployment with a JSON report, and tears down all resources â each action driven by a single ansible-playbook command.
+Every playbook is idempotent: repeated execution against an already-converged system produces changed=0 with no errors.
+Conclusion
+This lab required you to move beyond guided steps and design automation that handles real-world concerns: OS-conditional logic, idempotency, structured result collection, and self-validating deployments. The patterns you applied here â fact-driven branching, loop-based resource management, and assertion-gated validation â are the same patterns used in production Ansible roles. Extend this foundation by parameterising the container list further, adding Ansible Vault for secrets such as the MySQL root password, and integrating the validation playbook into a CI pipeline.
