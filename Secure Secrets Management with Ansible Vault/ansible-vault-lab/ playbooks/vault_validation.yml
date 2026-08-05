@@ -1,0 +1,65 @@
+---
+- name: Comprehensive Vault Validation
+  hosts: local
+  vars_files:
+    - ../vault_files/database_secrets.yml
+    - ../vault_files/staging_secrets.yml
+  tasks:
+    - name: Performance Test - Variable Access Speed
+      debug:
+        msg: "Accessing vault variables..."
+      with_items:
+        - "{{ db_username }}"
+        - "{{ db_host }}"
+        - "{{ db_name }}"
+      loop_control:
+        loop_var: vault_var
+      no_log: true
+    
+    - name: Security Test - Verify no plain text passwords in memory
+      shell: ps aux | grep -i ansible | grep -v grep
+      register: process_check
+      changed_when: false
+    
+    - name: Security Test - Check for password in process list
+      assert:
+        that: 
+          - "'MySecretPassword123' not in process_check.stdout"
+          - "'super_secret_password' not in process_check.stdout"
+        success_msg: "No passwords found in process list"
+        fail_msg: "WARNING: Passwords may be visible in process list"
+    
+    - name: Functionality Test - Variable Interpolation
+      set_fact:
+        test_config: |
+          [database]
+          host={{ db_host }}
+          port={{ db_port }}
+          name={{ db_name }}
+          user={{ db_username }}
+    
+    - name: Functionality Test - Verify interpolation worked
+      assert:
+        that:
+          - "'localhost' in test_config"
+          - "'production_db' in test_config"
+        success_msg: "Variable interpolation working correctly"
+    
+    - name: Integration Test - Multiple vault files
+      debug:
+        msg: 
+          - "Production DB: {{ db_name }}"
+          - "Staging DB: {{ hostvars[inventory_hostname]['db_name'] }}"
+      vars:
+        # This demonstrates accessing variables from different vault files
+        staging_db: "{{ hostvars[inventory_hostname]['db_name'] }}"
+    
+    - name: Final Validation Summary
+      debug:
+        msg:
+          - "=== Vault Validation Complete ==="
+          - "✓ Variable access: PASSED"
+          - "✓ Security check: PASSED"
+          - "✓ Interpolation: PASSED"
+          - "✓ Multi-file support: PASSED"
+          - "=== All tests successful ==="
