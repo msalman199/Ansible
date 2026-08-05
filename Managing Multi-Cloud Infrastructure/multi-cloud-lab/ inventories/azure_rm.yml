@@ -1,0 +1,19 @@
+---
+plugin: azure.azcollection.azure_rm
+include_vm_resource_groups:
+  - ansible-rg
+auth_source: auto
+keyed_groups:
+  - key: tags.Environment | default('unknown')
+    prefix: env
+  - key: tags.Cloud | default('unknown')
+    prefix: cloud
+  - key: location
+    prefix: location
+hostnames:
+  - public_ipv4_addresses
+  - name
+compose:
+  ansible_host: public_ipv4_addresses[0] | default(private_ipv4_addresses[0])
+  ansible_user: azureuser
+  ansible_ssh_private_key_file: ~/multi-cloud-lab/credentials/azure-key
