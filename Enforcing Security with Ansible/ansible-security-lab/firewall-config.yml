@@ -1,0 +1,98 @@
+---
+- name: Firewall Security Configuration
+  hosts: local
+  become: yes
+  vars:
+    allowed_ssh_port: 22
+    allowed_http_port: 80
+    allowed_https_port: 443
+    
+  tasks:
+    - name: Install UFW firewall
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+        
+    - name: Reset UFW to defaults
+      ufw:
+        state: reset
+        
+    - name: Set UFW default policies
+      ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: 'incoming', policy: 'deny' }
+        - { direction: 'outgoing', policy: 'allow' }
+        - { direction: 'routed', policy: 'deny' }
+        
+    - name: Allow SSH access
+      ufw:
+        rule: allow
+        port: "{{ allowed_ssh_port }}"
+        proto: tcp
+        comment: "SSH access"
+        
+    - name: Allow HTTP traffic
+      ufw:
+        rule: allow
+        port: "{{ allowed_http_port }}"
+        proto: tcp
+        comment: "HTTP web traffic"
+        
+    - name: Allow HTTPS traffic
+      ufw:
+        rule: allow
+        port: "{{ allowed_https_port }}"
+        proto: tcp
+        comment: "HTTPS web traffic"
+        
+    - name: Allow loopback traffic
+      ufw:
+        rule: allow
+        interface: lo
+        direction: in
+        
+    - name: Allow loopback traffic out
+      ufw:
+        rule: allow
+        interface: lo
+        direction: out
+        
+    - name: Deny specific high-risk ports
+      ufw:
+        rule: deny
+        port: "{{ item }}"
+        proto: tcp
+        comment: "Block high-risk port"
+      loop:
+        - "23"    # Telnet
+        - "135"   # RPC
+        - "139"   # NetBIOS
+        - "445"   # SMB
+        - "1433"  # SQL Server
+        - "3389"  # RDP
+        
+    - name: Enable UFW logging
+      ufw:
+        logging: "on"
+        
+    - name: Enable UFW firewall
+      ufw:
+        state: enabled
+        
+    - name: Create firewall status check script
+      copy:
+        content: |
+          #!/bin/bash
+          echo "=== UFW Firewall Status ==="
+          sudo ufw status verbose
+          echo ""
+          echo "=== Active Network Connections ==="
+          sudo netstat -tuln
+          echo ""
+          echo "=== UFW Rules ==="
+          sudo ufw show added
+        dest: /usr/local/bin/firewall-status.sh
+        mode: '0755'
