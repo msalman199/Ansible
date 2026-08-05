@@ -1,0 +1,44 @@
+---
+- name: Manage Multi-Cloud Infrastructure
+  hosts: all
+  gather_facts: true
+  become: yes
+  
+  tasks:
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Update package cache (RHEL/CentOS/Amazon Linux)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install common packages
+      package:
+        name:
+          - htop
+          - curl
+          - wget
+          - git
+        state: present
+
+    - name: Create a test file
+      copy:
+        content: |
+          This server is managed by Ansible
+          Cloud Provider: {{ group_names | select('match', 'cloud_.*') | first | default('unknown') }}
+          Hostname: {{ ansible_hostname }}
+          IP Address: {{ ansible_default_ipv4.address }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+        dest: /tmp/ansible-managed.txt
+        mode: '0644'
+
+    - name: Display system information
+      debug:
+        msg:
+          - "Hostname: {{ ansible_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "IP: {{ ansible_default_ipv4.address }}"
+          - "Cloud: {{ group_names | select('match', 'cloud_.*') | first | default('unknown') }}"
