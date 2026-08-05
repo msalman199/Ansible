@@ -1,0 +1,81 @@
+---
+- name: Comprehensive Security Demo
+  hosts: local
+  vars_files:
+    - ../vault_files/database_secrets.yml
+  vars:
+    # Mix encrypted and non-encrypted variables
+    app_name: "MySecureApp"
+    app_version: "1.0.0"
+    deployment_time: "{{ ansible_date_time.iso8601 }}"
+  tasks:
+    - name: Create application directory
+      file:
+        path: /tmp/secure_app
+        state: directory
+        mode: '0755'
+    
+    - name: Generate secure configuration
+      template:
+        content: |
+          # {{ app_name }} Configuration
+          # Version: {{ app_version }}
+          # Deployed: {{ deployment_time }}
+          
+          [application]
+          name={{ app_name }}
+          version={{ app_version }}
+          
+          [database]
+          host={{ db_host }}
+          port={{ db_port }}
+          name={{ db_name }}
+          user={{ db_username }}
+          # Password stored securely in vault
+          
+          [security]
+          api_key_configured=true
+          ssl_cert={{ ssl_cert_path }}
+          ssl_key={{ ssl_key_path }}
+          
+          [monitoring]
+          secret_token_length={{ secret_token | length }}
+        dest: /tmp/secure_app/app.conf
+        mode: '0600'
+    
+    - name: Create startup script with secure handling
+      copy:
+        content: |
+          #!/bin/bash
+          # Secure application startup script
+          
+          echo "Starting {{ app_name }} v{{ app_version }}"
+          echo "Database: {{ db_host }}:{{ db_port }}/{{ db_name }}"
+          echo "SSL Certificate: {{ ssl_cert_path }}"
+          
+          # Note: Actual passwords never echoed or logged
+          echo "Configuration loaded securely from vault"
+          
+          # Simulate application startup
+          echo "Application started successfully"
+        dest: /tmp/secure_app/start.sh
+        mode: '0755'
+    
+    - name: Run the startup script
+      command: /tmp/secure_app/start.sh
+      register: startup_output
+    
+    - name: Show startup output
+      debug:
+        var: startup_output.stdout_lines
+    
+    - name: Security audit - check file permissions
+      find:
+        paths: /tmp/secure_app
+        file_type: file
+      register: app_files
+    
+    - name: Display file security info
+      debug:
+        msg: "File: {{ item.path }}, Mode: {{ item.mode }}, Size: {{ item.size }} bytes"
+      loop: "{{ app_files.files }}"
