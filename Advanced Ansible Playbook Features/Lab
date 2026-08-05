@@ -1,0 +1,99 @@
+Advanced Ansible Playbook Features
+Objectives
+Design and implement Ansible playbooks that use loop constructs to manage multiple resources with a single task definition
+Build conditional logic into playbooks that branches execution based on gathered host facts such as OS family, memory, and CPU count
+Combine loops and conditionals in a single playbook to automate a realistic multi-component deployment scenario
+Prerequisites
+Comfort with Linux command-line operations including file editing, directory navigation, and reading command output
+Familiarity with YAML syntax including indentation rules, lists, and dictionaries
+Basic understanding of what Ansible is and how a playbook relates to inventory and tasks
+Lab Environment
+You will work on a dedicated AWS EC2 Ubuntu instance provided by Al Nafi. The instance has a base Ubuntu installation; you will install all required tools in Task 1.
+
+Task 1: Install and Verify the Ansible Environment
+Problem statement: Your EC2 instance has no automation tooling. Design an installation procedure that produces a working Ansible control node capable of running playbooks against localhost, and verify every component before proceeding.
+
+Step 1.1 â Install Python, pip, and Ansible; then confirm the binary is reachable
+Install Python 3, pip, and Ansible using the system package manager and pip. After installation, confirm that ansible --version returns a version string and that ansible localhost -m ping -c local returns a pong response.
+
+sudo apt update
+sudo apt install -y python3 python3-pip software-properties-common
+pip3 install --user ansible
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+ansible --version
+ansible localhost -m ping -c local
+Official installation reference if the above fails: https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+
+Troubleshoot this step:
+
+You may see ansible: command not found even after pip install succeeds.
+Run echo $PATH and confirm /home/$USER/.local/bin appears; if it does not, close and reopen your terminal, then run source ~/.bashrc again.
+https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+Step 1.2 â Create a working directory and a minimal inventory and configuration file
+Create a directory called ~/ansible-lab to hold all lab files. Inside it, create an ansible.cfg that sets the default inventory to a file you also create, and set host_key_checking = False. The inventory must define a group called local containing localhost with ansible_connection=local. Confirm the configuration is valid by running ansible-inventory --list and observing JSON output that includes the local group.
+
+mkdir -p ~/ansible-lab/inventory ~/ansible-lab/playbooks
+cd ~/ansible-lab
+
+cat > ansible.cfg <<EOF
+[defaults]
+inventory = inventory/hosts
+host_key_checking = False
+stdout_callback = yaml
+EOF
+
+cat > inventory/hosts <<EOF
+[local]
+localhost ansible_connection=local
+EOF
+
+ansible-inventory --list
+Acceptance criteria for Task 1:
+
+ansible --version prints a version line beginning with ansible [core and exits with code 0.
+ansible-inventory --list outputs valid JSON containing the key local with localhost listed as a member host.
+Task 2: Design a Loop-Driven Resource Provisioning Playbook
+Problem statement: Design and implement a playbook that provisions a set of system users, application directories, and plain-text configuration files entirely through loop constructs. You must use both the legacy with_items syntax and the modern loop keyword in separate tasks within the same playbook, and you must use the dict2items filter to iterate over a dictionary of service definitions. No task may hard-code a resource name â every name, path, and value must come from a variable.
+
+Step 2.1 â Define variables and implement the loop tasks
+Your playbook must declare the following variable structures (you choose the exact values):
+
+A list of at least four system users, each with a name and a shell field
+A list of at least four absolute directory paths under /opt or /var
+A dictionary of at least three services, where each key is a service name and each value is a sub-dictionary containing at minimum a port integer and a config_dir string
+Using these variables, write tasks that:
+
+Create all users with with_items
+Create all directories with loop
+Iterate the service dictionary with loop and dict2items to write a configuration file into each service's config_dir containing the service name and port
+Run the playbook with ansible-playbook playbooks/loops.yml and confirm it completes with zero failures.
+
+Acceptance criteria for Task 2:
+
+Running ansible-playbook playbooks/loops.yml exits with failed=0 and shows at least one changed result for each of the three resource types (users, directories, config files); confirm by inspecting the play recap line.
+Every configuration file written under the service config_dir paths contains the correct service name and port value when read with cat; verify at least two files manually after the playbook run.
+Task 3: Design a Fact-Driven Conditional Deployment Playbook
+Problem statement: Design and implement a single playbook that gathers host facts and uses them to make branching decisions about what to install, what files to write, and what messages to display. The playbook must cover at least three distinct conditional scenarios: one based on OS family, one based on available memory, and one based on CPU core count. It must also combine loops with conditionals so that at least one looped task is skipped for some items and executed for others based on a per-item field.
+
+Step 3.1 â Implement fact-based conditionals and a mixed loop-conditional task
+Your playbook must:
+
+Use gather_facts: yes and display at minimum the OS distribution, total memory in MB, and processor count using a debug task
+Install a set of packages only when ansible_facts['os_family'] == 'Debian'; the package list must come from a variable, not be inline
+Write a file to /tmp/resource-profile.txt whose content differs based on whether ansible_facts['memtotal_mb'] is below 2048, between 2048 and 8191, or 8192 and above â use Jinja2 if/elif/else inside the file content, not three separate tasks
+Define a list of application entries where each entry has a name, an environment field set to either production or development, and a min_memory_mb integer; loop over this list and write a deployment marker file to /tmp/ for each entry only when the host's actual memory meets or exceeds that entry's min_memory_mb value
+Run the playbook and confirm the output reflects the actual state of your EC2 instance.
+
+Step 3.2 â Verify conditional outcomes match host facts
+After the playbook runs, manually inspect the outputs to confirm the conditional logic fired correctly. Check /tmp/resource-profile.txt to confirm the memory tier matches what ansible localhost -m setup -c local | grep memtotal reports. List /tmp/ and confirm that deployment marker files exist only for entries whose min_memory_mb was satisfied.
+
+Acceptance criteria for Task 3:
+
+The play recap shows failed=0; the debug task output displays the correct OS distribution, memory, and CPU values that match the output of ansible localhost -m setup -c local | grep -E 'distribution|memtotal|processor_count'.
+The content of /tmp/resource-profile.txt matches the correct memory tier for the instance, and the set of deployment marker files in /tmp/ exactly corresponds to the application entries whose min_memory_mb threshold the instance satisfies â no extra files, no missing files.
+Expected Outcomes
+Two complete, idempotent Ansible playbooks exist under ~/ansible-lab/playbooks/ and both run to completion with failed=0 on a second consecutive execution without producing spurious changes.
+All files, directories, and users created by the playbooks are present on the filesystem and contain the values defined in the playbook variables, confirming that loops and conditionals executed as designed.
+Conclusion
+This lab required you to move beyond scripted step-following and design loop and conditional logic from first principles, which is the skill that separates maintainable Ansible automation from brittle one-off scripts. The combination of with_items, loop, dict2items, and fact-based when conditions you implemented here covers the majority of real-world Ansible branching patterns. Carry the habit of keeping all resource names in variables and all branching logic in when conditions forward into every playbook you write.
