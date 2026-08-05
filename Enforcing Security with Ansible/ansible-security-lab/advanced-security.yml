@@ -1,0 +1,101 @@
+---
+- name: Advanced Security Configuration
+  hosts: local
+  become: yes
+  
+  tasks:
+    - name: Install fail2ban for intrusion prevention
+      apt:
+        name: fail2ban
+        state: present
+        update_cache: yes
+        
+    - name: Create fail2ban SSH jail configuration
+      copy:
+        content: |
+          [sshd]
+          enabled = true
+          port = ssh
+          filter = sshd
+          logpath = /var/log/auth.log
+          maxretry = 3
+          bantime = 3600
+          findtime = 600
+        dest: /etc/fail2ban/jail.d/ssh.conf
+        backup: yes
+      notify: restart fail2ban
+      
+    - name: Start and enable fail2ban
+      service:
+        name: fail2ban
+        state: started
+        enabled: yes
+        
+    - name: Configure automatic security updates
+      apt:
+        name: unattended-upgrades
+        state: present
+        
+    - name: Enable automatic security updates
+      copy:
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Download-Upgradeable-Packages "1";
+          APT::Periodic::AutocleanInterval "7";
+          APT::Periodic::Unattended-Upgrade "1";
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        backup: yes
+        
+    - name: Set secure file permissions on sensitive files
+      file:
+        path: "{{ item }}"
+        mode: "0600"
+        owner: root
+        group: root
+      loop:
+        - /etc/ssh/sshd_config
+        - /etc/shadow
+        - /etc/gshadow
+        
+    - name: Disable unused network services
+      service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - avahi-daemon
+        - cups
+      ignore_errors: yes
+      
+    - name: Create security audit script
+      copy:
+        content: |
+          #!/bin/bash
+          echo "=== Security Audit Report ==="
+          echo "Date: $(date)"
+          echo ""
+          echo "=== SSH Configuration Status ==="
+          grep -E "PermitRootLogin|PasswordAuthentication|MaxAuthTries" /etc/ssh/sshd_config
+          echo ""
+          echo "=== Firewall Status ==="
+          ufw status
+          echo ""
+          echo "=== Fail2ban Status ==="
+          fail2ban-client status
+          echo ""
+          echo "=== Failed Login Attempts ==="
+          grep "Failed password" /var/log/auth.log | tail -5
+          echo ""
+          echo "=== System Updates Available ==="
+          apt list --upgradable 2>/dev/null | wc -l
+          echo ""
+          echo "=== Listening Services ==="
+          netstat -tuln | grep LISTEN
+        dest: /usr/local/bin/security-audit.sh
+        mode: '0755'
+        
+  handlers:
+    - name: restart fail2ban
+      service:
+        name: fail2ban
+        state: restarted
